@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Honors Biology — 3D Models</title>
+<style>
+:root{
+  --glass:#F2EFF7; --glass-2:#E7E2F0; --track:#D9D2E6;
+  --page-ink:#241B3D; --page-mute:#5E5678; --page-faint:#8A82A0;
+  --eosin:#E0417B; --eosin-ink:#B82A5D; --cyto:#2FB8A0; --amber:#F0A73A;
+  --panel:#1C1530; --panel-2:#241B3D; --hema:#6B4BA8; --hema-dim:#3A2B5C;
+  --ink:#EFE9F7; --ink-mute:#A79DBD; --ink-faint:#6F6689;
+  --body:"Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+  --display:"Palatino Linotype","Book Antiqua",Palatino,Georgia,serif;
+  --mono:"Cascadia Mono",Consolas,"SF Mono",monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden}
+body{
+  background:radial-gradient(1200px 700px at 50% -12%,#fff 0%,transparent 62%),
+             linear-gradient(180deg,var(--glass),var(--glass-2));
+  color:var(--page-ink);font-family:var(--body);
+  -webkit-font-smoothing:antialiased;
+}
+#stage{position:fixed;inset:0}
+canvas{display:block;touch-action:none}
+
+/* ---- top bar ---- */
+#bar{
+  position:fixed;top:0;left:0;right:0;display:flex;gap:10px;align-items:center;
+  padding:12px 16px;background:linear-gradient(180deg,rgba(242,239,247,.96),rgba(242,239,247,0));
+  z-index:10;flex-wrap:wrap;
+}
+#bar h1{font-family:var(--display);font-size:17px;margin:0;font-weight:600;flex:0 0 auto}
+#picker{
+  font:inherit;font-size:13px;padding:7px 11px;border-radius:7px;
+  border:1px solid var(--track);background:#fff;color:var(--page-ink);cursor:pointer;
+}
+.btn{
+  font:inherit;font-size:12.5px;font-weight:600;border:0;border-radius:7px;padding:7px 13px;
+  background:var(--eosin);color:#fff;cursor:pointer;
+}
+.btn.ghost{background:rgba(255,255,255,.75);color:var(--page-mute);border:1px solid var(--track)}
+.btn:active{transform:translateY(1px)}
+.spacer{flex:1 1 auto}
+#lvl{font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--page-faint);text-transform:uppercase}
+
+/* ---- info panel ---- */
+#info{
+  position:fixed;right:16px;bottom:16px;width:min(330px,calc(100vw - 32px));
+  background:linear-gradient(165deg,var(--panel-2),var(--panel));
+  border:1px solid var(--hema-dim);border-radius:10px;padding:16px;color:var(--ink);
+  box-shadow:0 8px 28px rgba(36,27,61,.3);z-index:10;
+  transform:translateY(8px);opacity:0;pointer-events:none;transition:.22s ease;
+}
+#info.on{transform:none;opacity:1;pointer-events:auto}
+#info .eyebrow{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--eosin)}
+#info h2{font-family:var(--display);font-size:18px;margin:7px 0 8px;font-weight:600}
+#info p{font-size:14px;line-height:1.55;margin:0;color:var(--ink-mute)}
+#info .x{position:absolute;top:10px;right:12px;cursor:pointer;color:var(--ink-faint);font-size:17px;line-height:1}
+
+/* ---- hint ---- */
+#hint{
+  position:fixed;left:16px;bottom:16px;z-index:10;max-width:min(300px,calc(100vw - 32px));
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.05em;color:var(--page-faint);line-height:1.7;
+}
+#load{
+  position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--page-faint);background:var(--glass);z-index:20;
+}
+@media (max-width:560px){
+  #bar h1{font-size:15px;width:100%}
+  #info{left:16px;right:16px;width:auto;bottom:52px}
+  #hint{display:none}
+}
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="bar">
+  <h1>Biology in 3D</h1>
+  <select id="picker"></select>
+  <button class="btn ghost" id="reset">Recenter</button>
+  <span class="spacer"></span>
+  <span id="lvl"></span>
+</div>
+<div id="info"><span class="x" id="infoX">&times;</span><div class="eyebrow" id="infoTag"></div><h2 id="infoTitle"></h2><p id="infoBody"></p></div>
+<div id="hint">Drag to rotate &middot; scroll or pinch to zoom &middot; click a labeled part</div>
+<div id="load">Loading</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/* ============================================================
+   HONORS BIOLOGY — 3D MODEL HARNESS
+   Three.js r128 (UMD, pinned). No OrbitControls in r128, so a
+   minimal orbit controller is implemented below for mouse+touch.
+   Avoid CapsuleGeometry (r142+). Use Cylinder/Sphere.
+
+   TO ADD A MODEL: push one object into MODELS. Required shape:
+     { id, name, level, hint, build(ctx) }
+   build() receives { group, add, THREE } and should populate
+   `group`. Use add(mesh, {tag,title,body}) to make a mesh
+   clickable with an info-panel entry.
+   ============================================================ */
+
+var W, H, renderer, scene, camera, raycaster, pointer, root, current;
+var PICKABLE = [];
+
+function boot(){
+  var stage = document.getElementById('stage');
+  W = window.innerWidth; H = window.innerHeight;
+
+  renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(W, H);
+  stage.appendChild(renderer.domElement);
+
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(45, W/H, 0.1, 2000);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.62));
+  var key = new THREE.DirectionalLight(0xffffff, 0.85); key.position.set(6,9,7); scene.add(key);
+  var rim = new THREE.DirectionalLight(0xB98BFF, 0.35); rim.position.set(-7,-3,-6); scene.add(rim);
+
+  raycaster = new THREE.Raycaster();
+  pointer = new THREE.Vector2();
+
+  root = new THREE.Group(); scene.add(root);
+
+  initOrbit(renderer.domElement);
+  window.addEventListener('resize', onResize);
+  renderer.domElement.addEventListener('click', onClick);
+  document.getElementById('infoX').onclick = hideInfo;
+  document.getElementById('reset').onclick = function(){ orbit.reset(); };
+
+  buildPicker();
+  load(0);
+  document.getElementById('load').style.display='none';
+  animate();
+}
+function onResize(){
+  W=window.innerWidth; H=window.innerHeight;
+  camera.aspect=W/H; camera.updateProjectionMatrix(); renderer.setSize(W,H);
+}
+
+/* ---------------- minimal orbit controller ---------------- */
+var orbit = {
+  theta:0.6, phi:1.15, radius:16, target:new THREE.Vector3(0,0,0),
+  base:{theta:0.6, phi:1.15, radius:16},
+  apply:function(){
+    var p=Math.max(0.15, Math.min(Math.PI-0.15, this.phi));
+    camera.position.set(
+      this.target.x + this.radius*Math.sin(p)*Math.sin(this.theta),
+      this.target.y + this.radius*Math.cos(p),
+      this.target.z + this.radius*Math.sin(p)*Math.cos(this.theta)
+    );
+    camera.lookAt(this.target);
+  },
+  reset:function(){ this.theta=this.base.theta; this.phi=this.base.phi; this.radius=this.base.radius; this.apply(); },
+  frame:function(r){ this.base.radius=r; this.radius=r; this.apply(); }
+};
+function initOrbit(el){
+  var down=false, lx=0, ly=0, pinch=0, moved=0;
+  function start(x,y){ down=true; lx=x; ly=y; moved=0; }
+  function move(x,y){
+    if(!down) return;
+    var dx=x-lx, dy=y-ly; lx=x; ly=y; moved+=Math.abs(dx)+Math.abs(dy);
+    orbit.theta -= dx*0.008;
+    orbit.phi   -= dy*0.008;
+    orbit.apply();
+  }
+  function end(){ down=false; }
+  el.addEventListener('mousedown',function(e){ start(e.clientX,e.clientY); });
+  window.addEventListener('mousemove',function(e){ move(e.clientX,e.clientY); });
+  window.addEventListener('mouseup',end);
+  el.addEventListener('wheel',function(e){
+    e.preventDefault();
+    orbit.radius = Math.max(3, Math.min(120, orbit.radius + (e.deltaY>0?1:-1)*orbit.radius*0.09));
+    orbit.apply();
+  },{passive:false});
+  el.addEventListener('touchstart',function(e){
+    if(e.touches.length===1) start(e.touches[0].clientX,e.touches[0].clientY);
+    else if(e.touches.length===2) pinch=dist(e.touches);
+  },{passive:true});
+  el.addEventListener('touchmove',function(e){
+    if(e.touches.length===1) move(e.touches[0].clientX,e.touches[0].clientY);
+    else if(e.touches.length===2){
+      var d=dist(e.touches);
+      if(pinch){ orbit.radius=Math.max(3,Math.min(120,orbit.radius*(pinch/d))); orbit.apply(); }
+      pinch=d;
+    }
+    e.preventDefault();
+  },{passive:false});
+  el.addEventListener('touchend',function(){ end(); pinch=0; },{passive:true});
+  function dist(t){ var a=t[0], b=t[1]; return Math.hypot(a.clientX-b.clientX, a.clientY-b.clientY); }
+  orbit.apply();
+}
+
+/* ---------------- picking + info panel ---------------- */
+function onClick(e){
+  pointer.x = (e.clientX / W) * 2 - 1;
+  pointer.y = -(e.clientY / H) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+  var hits = raycaster.intersectObjects(PICKABLE, true);
+  if(!hits.length){ hideInfo(); return; }
+  var o = hits[0].object;
+  while(o && !o.userData.info) o = o.parent;
+  if(o && o.userData.info) showInfo(o.userData.info);
+}
+function showInfo(i){
+  document.getElementById('infoTag').textContent = i.tag || '';
+  document.getElementById('infoTitle').textContent = i.title || '';
+  document.getElementById('infoBody').textContent = i.body || '';
+  document.getElementById('info').classList.add('on');
+}
+function hideInfo(){ document.getElementById('info').classList.remove('on'); }
+
+/* ---------------- model loading ---------------- */
+function clearRoot(){
+  PICKABLE.length = 0;
+  while(root.children.length){
+    var c = root.children[0];
+    root.remove(c);
+    c.traverse(function(o){
+      if(o.geometry) o.geometry.dispose();
+      if(o.material){ (Array.isArray(o.material)?o.material:[o.material]).forEach(function(m){m.dispose();}); }
+    });
+  }
+}
+function load(i){
+  clearRoot(); hideInfo();
+  current = MODELS[i];
+  var group = new THREE.Group(); root.add(group);
+  function add(mesh, info){
+    if(info){ mesh.userData.info = info; PICKABLE.push(mesh); }
+    group.add(mesh); return mesh;
+  }
+  current.build({group:group, add:add, THREE:THREE});
+  document.getElementById('lvl').textContent = current.level || '';
+  document.getElementById('hint').textContent = current.hint || 'Drag to rotate · scroll to zoom · click a labeled part';
+  orbit.frame(current.radius || 16);
+}
+function buildPicker(){
+  var p = document.getElementById('picker');
+  MODELS.forEach(function(m,i){
+    var o=document.createElement('option'); o.value=i; o.textContent=m.name; p.appendChild(o);
+  });
+  p.onchange = function(){ load(parseInt(this.value,10)); };
+}
+function animate(){
+  requestAnimationFrame(animate);
+  if(current && current.tick) current.tick(performance.now()*0.001);
+  renderer.render(scene, camera);
+}
+
+/* ---------------- shared helpers ---------------- */
+function mat(hex, opts){
+  opts = opts || {};
+  return new THREE.MeshStandardMaterial({
+    color:hex, roughness:opts.rough!==undefined?opts.rough:0.55,
+    metalness:opts.metal||0.05,
+    transparent:opts.opacity!==undefined, opacity:opts.opacity!==undefined?opts.opacity:1,
+    side:opts.side||THREE.FrontSide, flatShading:!!opts.flat
+  });
+}
+function ball(r, hex, seg, opts){ return new THREE.Mesh(new THREE.SphereGeometry(r, seg||24, seg||24), mat(hex,opts)); }
+function rod(r, len, hex, opts){ return new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 16), mat(hex,opts)); }
+/* r128 has no CapsuleGeometry — compose one */
+function capsule(r, len, hex, opts){
+  var g = new THREE.Group();
+  var m = mat(hex, opts);
+  var body = new THREE.Mesh(new THREE.CylinderGeometry(r,r,len,20), m);
+  var a = new THREE.Mesh(new THREE.SphereGeometry(r,20,16), m); a.position.y =  len/2;
+  var b = new THREE.Mesh(new THREE.SphereGeometry(r,20,16), m); b.position.y = -len/2;
+  g.add(body,a,b); return g;
+}
+
+/* ============================================================
+   MODEL 1 — Cell Explorer (Level 4 & 5)
+   Bacterial cell beside a human cell, clickable structures.
+   This is the reference implementation. Models 2-5 follow it.
+   ============================================================ */
+var MODELS = [];
+
+MODELS.push({
+  id:'cells',
+  name:'1 · Bacteria vs. Your Cells',
+  level:'Levels 4–5 · 3.1.9-12.B',
+  hint:'Click any structure. Bacterium on the left, human cell on the right — note the missing nucleus.',
+  radius:20,
+  build:function(ctx){
+    var add=ctx.add, g=ctx.group;
+
+    /* ---------- prokaryote (left) ---------- */
+    var pro = new THREE.Group(); pro.position.x = -7.5; g.add(pro);
+
+    var wall = capsule(2.5, 3.4, 0x7BC47F, {opacity:0.30});
+    wall.rotation.z = Math.PI/2;
+    wall.userData.info = {tag:'Prokaryote', title:'Peptidoglycan cell wall',
+      body:'Rigid mesh outside the membrane. Human cells have no wall at all, which is exactly why penicillin — which blocks the enzyme that cross-links this mesh — harms bacteria and not you.'};
+    wall.children.forEach(function(c){ PICKABLE.push(c); c.userData.info = wall.userData.info; });
+    pro.add(wall);
+
+    var pmem = capsule(2.15, 3.4, 0x2FB8A0, {opacity:0.45});
+    pmem.rotation.z = Math.PI/2;
+    pmem.children.forEach(function(c){ PICKABLE.push(c); c.userData.info =
+      {tag:'Prokaryote', title:'Plasma membrane', body:'A phospholipid bilayer, same basic architecture as yours. In bacteria it also carries out the electron transport chain, since there are no mitochondria.'}; });
+    pro.add(pmem);
+
+    /* circular chromosome — a wobbly torus knot stands in for the nucleoid */
+    var chrom = new THREE.Mesh(new THREE.TorusKnotGeometry(1.0, 0.11, 120, 12, 2, 3), mat(0xE0417B,{rough:0.4}));
+    chrom.rotation.x = 0.6;
+    add(chrom, {tag:'Prokaryote', title:'Circular chromosome (nucleoid)',
+      body:'One circular DNA molecule, loose in the cytoplasm. No nuclear envelope — that absence is the single defining difference between prokaryotes and eukaryotes.'});
+    pro.add(chrom); PICKABLE.push(chrom);
+
+    for(var i=0;i<3;i++){
+      var pl = new THREE.Mesh(new THREE.TorusGeometry(0.33,0.055,10,28), mat(0xF0A73A,{rough:0.4}));
+      pl.position.set(-0.9+i*0.95, 1.1-i*0.5, 0.5);
+      pl.rotation.set(Math.random(),Math.random(),0);
+      pl.userData.info = {tag:'Prokaryote', title:'Plasmid',
+        body:'Small circular DNA separate from the chromosome. Plasmids carry antibiotic-resistance genes and can move between bacteria — even between species — which is why resistance spreads sideways, not just by descent.'};
+      pro.add(pl); PICKABLE.push(pl);
+    }
+    for(var r=0;r<14;r++){
+      var rb = ball(0.13, 0xB98BFF, 10);
+      rb.position.set((Math.random()-0.5)*4.6,(Math.random()-0.5)*3.0,(Math.random()-0.5)*3.0);
+      rb.userData.info = {tag:'Both cell types', title:'Ribosome',
+        body:'Builds protein in every cell alive. Bacterial ribosomes are slightly smaller than yours — another difference antibiotics such as tetracycline exploit.'};
+      pro.add(rb); PICKABLE.push(rb);
+    }
+    var flag = rod(0.07, 4.2, 0x7BC47F);
+    flag.position.set(-4.6,0,0); flag.rotation.z = Math.PI/2;
+    flag.userData.info = {tag:'Prokaryote', title:'Flagellum',
+      body:'A rotating protein motor for movement. Simple does not mean immobile.'};
+    pro.add(flag); PICKABLE.push(flag);
+
+    /* ---------- eukaryote (right) ---------- */
+    var euk = new THREE.Group(); euk.position.x = 6.5; g.add(euk);
+
+    var emem = ball(5.2, 0x2FB8A0, 40, {opacity:0.20, side:THREE.DoubleSide});
+    emem.userData.info = {tag:'Eukaryote', title:'Plasma membrane',
+      body:'Fluid mosaic: a bilayer studded with proteins, with no wall outside it. Surface carbohydrates act as identity markers — how your immune system tells your cells from an invader.'};
+    euk.add(emem); PICKABLE.push(emem);
+
+    var nuc = ball(1.9, 0x6B4BA8, 32);
+    nuc.userData.info = {tag:'Eukaryote', title:'Nucleus',
+      body:'A double membrane perforated by pores, enclosing linear chromosomes. mRNA exits; DNA stays. This compartment is what "eukaryote" means.'};
+    euk.add(nuc); PICKABLE.push(nuc);
+    var nucl = ball(0.75, 0xE0417B, 20); nucl.position.set(0.5,0.3,0.4);
+    nucl.userData.info = {tag:'Eukaryote', title:'Nucleolus',
+      body:'Dense region inside the nucleus where ribosome subunits are assembled.'};
+    euk.add(nucl); PICKABLE.push(nucl);
+
+    var mitoInfo = {tag:'Eukaryote', title:'Mitochondrion',
+      body:'Double membrane, inner one folded into cristae to maximize surface area for the electron transport chain. Its own circular DNA and its own ribosomes are the evidence for endosymbiosis.'};
+    for(var m=0;m<4;m++){
+      var mi = capsule(0.42, 1.0, 0xF0A73A);
+      var ang = m*1.9;
+      mi.position.set(Math.cos(ang)*3.2, Math.sin(ang)*2.3, Math.sin(ang*1.7)*2.2);
+      mi.rotation.set(ang, ang*0.7, 0.4);
+      mi.children.forEach(function(c){ c.userData.info = mitoInfo; PICKABLE.push(c); });
+      euk.add(mi);
+    }
+    var er = new THREE.Mesh(new THREE.TorusGeometry(2.9,0.20,10,60,Math.PI*1.35), mat(0x8FA8E8));
+    er.rotation.set(1.2,0.4,0);
+    er.userData.info = {tag:'Eukaryote', title:'Rough endoplasmic reticulum',
+      body:'Studded with ribosomes. Proteins are synthesized here, fold inside it, and leave in vesicles bound for the Golgi.'};
+    euk.add(er); PICKABLE.push(er);
+
+    var golgi = new THREE.Group();
+    for(var gi=0; gi<4; gi++){
+      var disc = new THREE.Mesh(new THREE.TorusGeometry(1.0-gi*0.13, 0.10, 8, 30), mat(0xE87FB0));
+      disc.position.y = gi*0.30; disc.rotation.x = Math.PI/2;
+      golgi.add(disc); PICKABLE.push(disc);
+      disc.userData.info = {tag:'Eukaryote', title:'Golgi apparatus',
+        body:'Modifies, sorts, and packages proteins arriving from the ER, then ships them out in vesicles. The cell\u2019s shipping department.'};
+    }
+    golgi.position.set(-2.6,-2.0,1.0); golgi.rotation.z = 0.3;
+    euk.add(golgi);
+
+    var lyso = ball(0.62, 0x9B5FE0, 20); lyso.position.set(2.4,-2.6,1.4);
+    lyso.userData.info = {tag:'Eukaryote', title:'Lysosome',
+      body:'Packed with hydrolytic enzymes at pH 5. Digests worn organelles — and any bacterium a white blood cell has just swallowed by phagocytosis.'};
+    euk.add(lyso); PICKABLE.push(lyso);
+
+    for(var er2=0; er2<10; er2++){
+      var rb2 = ball(0.13, 0xB98BFF, 10);
+      rb2.position.set((Math.random()-0.5)*7,(Math.random()-0.5)*7,(Math.random()-0.5)*6);
+      if(rb2.position.length()<2.4) rb2.position.multiplyScalar(2.2);
+      rb2.userData.info = {tag:'Both cell types', title:'Ribosome',
+        body:'Present in every cell, prokaryote and eukaryote alike — one of the features shared across all life.'};
+      euk.add(rb2); PICKABLE.push(rb2);
+    }
+
+    this._pro = pro; this._euk = euk;
+  },
+  tick:function(t){
+    if(this._pro) this._pro.rotation.y = Math.sin(t*0.16)*0.22;
+    if(this._euk) this._euk.rotation.y = t*0.055;
+  }
+});
+
+/* ============================================================
+   MODELS 2–5 GO HERE. Follow the pattern above exactly:
+   MODELS.push({ id, name, level, hint, radius, build(ctx), tick? })
+
+   2 · Membrane Transport      — Levels 6   — 3.1.9-12.B
+   3 · DNA to Protein          — Levels 14,15 — 3.1.9-12.A
+   4 · Enzyme & Inhibitor      — Level 7   — 3.2.9-12.E
+   5 · Mitosis & Meiosis       — Levels 17,18 — 3.1.9-12.D/Q
+   ============================================================ */
+
+boot();
+</script>
+</body>
+</html>
