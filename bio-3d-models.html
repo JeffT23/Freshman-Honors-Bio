@@ -1010,11 +1010,214 @@ MODELS.push({
 });
 
 /* ============================================================
-   MODEL 5 GOES HERE. Follow the pattern above exactly:
-   MODELS.push({ id, name, level, hint, radius, build(ctx), tick? })
-
-   5 · Mitosis & Meiosis       — Levels 17,18 — 3.1.9-12.D/Q
+   MODEL 5 — Mitosis & Meiosis (Levels 17–18)
+   Four chromosomes (2 homologous pairs, maternal/paternal colored).
+   A Mode toggle switches mitosis/meiosis; a Step button advances
+   phases within whichever mode is active. Every chromatid's position
+   is a pure function of (pair, parent, sister) + phase, animated by
+   lerping from the previous step's settled pose to the new one.
    ============================================================ */
+MODELS.push({
+  id:'division',
+  name:'5 · Mitosis & Meiosis',
+  level:'Levels 17–18 · 3.1.9-12.D/Q',
+  hint:'Click a chromosome for its origin · Mode toggles mitosis/meiosis · Step advances the phase',
+  radius:10,
+  build:function(ctx){
+    var g=ctx.group, self=this;
+    if(self._mode===undefined) self._mode='mitosis';
+    if(self._step===undefined) self._step=0;
+
+    function pick(container, info){
+      container.userData.info=info;
+      if(container.isMesh) PICKABLE.push(container);
+      container.traverse(function(o){ if(o!==container && o.isMesh) PICKABLE.push(o); });
+    }
+    function stretchSegment(mesh,p1,p2){
+      var dir=new THREE.Vector3().subVectors(p2,p1);
+      var len=Math.max(dir.length(),0.001);
+      mesh.position.copy(p1).addScaledVector(dir,0.5);
+      mesh.scale.set(1,len,1);
+      mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), dir.clone().normalize());
+      mesh.visible=true;
+    }
+
+    var MCOLOR=0xE0417B, PCOLOR=0x8FA8E8, LEN1=1.5, LEN2=1.05;
+    function chromatidMesh(color,len){
+      var grp=new THREE.Group();
+      var upper=rod(0.09,len*0.42,color); upper.position.y=len*0.29;
+      var lower=rod(0.09,len*0.58,color); lower.position.y=-len*0.21;
+      grp.add(upper,lower);
+      grp.userData.upper=upper; grp.userData.lower=lower;
+      return grp;
+    }
+
+    var CHROM=[
+      {pair:1,parent:'M',sister:0},{pair:1,parent:'M',sister:1},
+      {pair:1,parent:'P',sister:0},{pair:1,parent:'P',sister:1},
+      {pair:2,parent:'M',sister:0},{pair:2,parent:'M',sister:1},
+      {pair:2,parent:'P',sister:0},{pair:2,parent:'P',sister:1}
+    ];
+    var matInfo={tag:'Chromosome', title:'Maternal chromosome',
+      body:'Inherited from the mother. It was already replicated into two identical sister chromatids joined at a centromere back in S phase, before any of the division steps shown here.'};
+    var patInfo={tag:'Chromosome', title:'Paternal chromosome',
+      body:'Inherited from the father. It carries the same genes as its maternal homolog but not necessarily the same alleles — which is exactly what makes crossing over and independent assortment produce genetic variation.'};
+    CHROM.forEach(function(c){
+      var color=c.parent==='M'?MCOLOR:PCOLOR, len=c.pair===1?LEN1:LEN2;
+      c.mesh=chromatidMesh(color,len); c.color=color;
+      g.add(c.mesh);
+      pick(c.mesh, c.parent==='M'?matInfo:patInfo);
+    });
+    var SISTER_PAIRS=[[0,1],[2,3],[4,5],[6,7]];
+
+    var connectors=[]; for(var ci=0;ci<4;ci++){ var cm=rod(0.05,1,0xEFE9F7); cm.visible=false; g.add(cm); connectors.push(cm); }
+    var fibers=[]; for(var fi=0;fi<8;fi++){ var fm=rod(0.035,1,0xC9BEDD); fm.visible=false; g.add(fm); fibers.push(fm); }
+    var outlines=[]; for(var oi=0;oi<4;oi++){ var om=ball(1.0,0xB98BFF,20,{opacity:0.14}); om.visible=false; g.add(om); outlines.push(om); }
+
+    /* ---------- position functions: pure functions of (pair, parent, sister) ---------- */
+    function orderIdx(c){ return (c.pair-1)*2 + (c.parent==='M'?0:1); }
+    function interphasePos(c){
+      var col=(c.parent==='M')?-0.8:0.8, row=(c.pair===1)?1.5:-1.5, so=c.sister?0.3:-0.3;
+      return new THREE.Vector3(col+so*0.3, row+so*0.5, so);
+    }
+    function metaphasePos(c){ var x=(orderIdx(c)-1.5)*1.0; return new THREE.Vector3(x+(c.sister?0.12:-0.12),0,0); }
+    function anaphasePos(c){ var x=(orderIdx(c)-1.5)*1.0; return new THREE.Vector3(x, c.sister?2.6:-2.6, 0); }
+    function prophaseIPos(c){
+      var pairX=(c.pair===1)?-1.0:1.0, po=(c.parent==='M')?-0.35:0.35, so=c.sister?0.12:-0.12;
+      return new THREE.Vector3(pairX+po+so,0,0);
+    }
+    function anaphaseIPos(c){
+      var pairX=(c.pair===1)?-0.6:0.6, poleY=(c.parent==='M')?2.6:-2.6, so=c.sister?0.12:-0.12;
+      return new THREE.Vector3(pairX+so,poleY,0);
+    }
+    function meiosisIIPos(c){
+      var pairX=(c.pair===1)?-0.6:0.6, poleY=(c.parent==='M')?2.6:-2.6, spread=c.sister?0.55:-0.55;
+      return new THREE.Vector3(pairX+spread*0.5, poleY+spread, 0);
+    }
+    function resultMeiosisPos(c){
+      var cx=(c.sister===0)?-2.0:2.0, cy=(c.parent==='M')?2.6:-2.6, po=(c.pair===1)?-0.3:0.3;
+      return new THREE.Vector3(cx+po,cy,0);
+    }
+    function targetFor(mode,step,c){
+      if(mode==='mitosis'){
+        if(step===0) return interphasePos(c);
+        if(step===1) return metaphasePos(c);
+        return anaphasePos(c);
+      }
+      if(step===0) return interphasePos(c);
+      if(step===1) return prophaseIPos(c);
+      if(step===2) return anaphaseIPos(c);
+      if(step===3) return meiosisIIPos(c);
+      return resultMeiosisPos(c);
+    }
+    function poleFor(mode,step,c){
+      if(mode==='mitosis'){
+        if(step!==1 && step!==2) return null;
+        return new THREE.Vector3(0, c.sister?3.2:-3.2, 0);
+      }
+      if(step===2) return new THREE.Vector3(0, c.parent==='M'?3.2:-3.2, 0);
+      if(step===3) return new THREE.Vector3(0, (c.parent==='M'?2.6:-2.6)+(c.sister?1.0:-1.0), 0);
+      return null;
+    }
+
+    self._div={
+      CHROM:CHROM, connectors:connectors, fibers:fibers, outlines:outlines, SISTER_PAIRS:SISTER_PAIRS,
+      MCOLOR:MCOLOR, PCOLOR:PCOLOR, targetFor:targetFor, poleFor:poleFor,
+      lastMode:null, lastStep:-1, transStart:0, stretchSegment:stretchSegment
+    };
+    CHROM.forEach(function(c){ c.mesh.position.copy(interphasePos(c)); });
+
+    /* ---------- Mode + Step buttons ---------- */
+    var MITO_LABELS=['Interphase ▶','Metaphase: chromosomes align ▶',
+      'Anaphase: sister chromatids separate ▶','Result: 2 identical diploid cells ▶'];
+    var MEIO_LABELS=['Interphase ▶','Prophase I: crossing over ▶',
+      'Anaphase I — homologs separate: the reduction division ▶',
+      'Meiosis II: sister chromatids separate ▶','Result: 4 distinct haploid cells ▶'];
+
+    var stepBtn=document.getElementById('divStep');
+    if(!stepBtn){
+      stepBtn=document.createElement('button');
+      stepBtn.id='divStep'; stepBtn.className='btn';
+      document.getElementById('bar').insertBefore(stepBtn, document.getElementById('lvl'));
+      stepBtn.onclick=function(){
+        var labels=self._mode==='mitosis'?MITO_LABELS:MEIO_LABELS;
+        self._step=(self._step+1)%labels.length;
+        stepBtn.textContent=labels[self._step];
+      };
+    }
+    stepBtn.setAttribute('data-model-ui','division');
+    stepBtn.textContent=(self._mode==='mitosis'?MITO_LABELS:MEIO_LABELS)[self._step];
+
+    var modeBtn=document.getElementById('divMode');
+    if(!modeBtn){
+      modeBtn=document.createElement('button');
+      modeBtn.id='divMode'; modeBtn.className='btn ghost';
+      document.getElementById('bar').insertBefore(modeBtn, document.getElementById('lvl'));
+      modeBtn.onclick=function(){
+        self._mode=self._mode==='mitosis'?'meiosis':'mitosis';
+        self._step=0;
+        modeBtn.textContent=self._mode==='mitosis'?'Mitosis':'Meiosis';
+        stepBtn.textContent=(self._mode==='mitosis'?MITO_LABELS:MEIO_LABELS)[0];
+      };
+    }
+    modeBtn.setAttribute('data-model-ui','division');
+    modeBtn.textContent=self._mode==='mitosis'?'Mitosis':'Meiosis';
+  },
+  tick:function(t){
+    var self=this, div=self._div;
+    if(!div) return;
+    var mode=self._mode, step=self._step, CHROM=div.CHROM;
+
+    if(div.lastMode!==mode || div.lastStep!==step){
+      div.lastMode=mode; div.lastStep=step;
+      div.fromPos=CHROM.map(function(c){ return c.mesh.position.clone(); });
+      div.toPos=CHROM.map(function(c){ return div.targetFor(mode,step,c); });
+      div.transStart=t;
+    }
+    var tt=Math.min(1,(t-div.transStart)/1.1);
+    CHROM.forEach(function(c,idx){ c.mesh.position.lerpVectors(div.fromPos[idx], div.toPos[idx], tt); });
+
+    /* crossing over: pair 1's sister-0 chromatids swap color from Prophase I onward in meiosis */
+    CHROM.forEach(function(c){
+      var col=c.color;
+      if(c.pair===1 && c.sister===0 && mode==='meiosis' && step>=1) col=(c.parent==='M')?div.PCOLOR:div.MCOLOR;
+      c.mesh.userData.upper.material.color.setHex(col);
+    });
+
+    /* sister chromatids stay visibly joined until they actually separate */
+    var jointUntilStep = mode==='mitosis'?1:2;
+    div.SISTER_PAIRS.forEach(function(pair,idx){
+      var cm=div.connectors[idx], c0=CHROM[pair[0]], c1=CHROM[pair[1]];
+      if(step<=jointUntilStep) div.stretchSegment(cm, c0.mesh.position, c1.mesh.position);
+      else cm.visible=false;
+    });
+
+    /* spindle fibers */
+    CHROM.forEach(function(c,idx){
+      var pole=div.poleFor(mode,step,c);
+      var fm=div.fibers[idx];
+      if(pole) div.stretchSegment(fm, pole, c.mesh.position);
+      else fm.visible=false;
+    });
+
+    /* daughter cell outlines */
+    div.outlines.forEach(function(o){ o.visible=false; });
+    if(mode==='mitosis' && step===3){
+      div.outlines[0].scale.setScalar(1); div.outlines[0].position.set(0,2.6,0); div.outlines[0].visible=true;
+      div.outlines[1].scale.setScalar(1); div.outlines[1].position.set(0,-2.6,0); div.outlines[1].visible=true;
+    } else if(mode==='meiosis' && step===3){
+      div.outlines[0].scale.setScalar(1); div.outlines[0].position.set(0,2.6,0); div.outlines[0].visible=true;
+      div.outlines[1].scale.setScalar(1); div.outlines[1].position.set(0,-2.6,0); div.outlines[1].visible=true;
+    } else if(mode==='meiosis' && step===4){
+      var corners=[[-2.0,2.6],[2.0,2.6],[-2.0,-2.6],[2.0,-2.6]];
+      corners.forEach(function(p,idx){
+        div.outlines[idx].scale.setScalar(0.75);
+        div.outlines[idx].position.set(p[0],p[1],0);
+        div.outlines[idx].visible=true;
+      });
+    }
+  }
+});
 
 boot();
 </script>
