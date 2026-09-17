@@ -232,6 +232,9 @@ function clearRoot(){
 function load(i){
   clearRoot(); hideInfo();
   current = MODELS[i];
+  document.querySelectorAll('#bar [data-model-ui]').forEach(function(el){
+    el.style.display = (el.getAttribute('data-model-ui')===current.id) ? '' : 'none';
+  });
   var group = new THREE.Group(); root.add(group);
   function add(mesh, info){
     if(info){ mesh.userData.info = info; PICKABLE.push(mesh); }
@@ -404,10 +407,205 @@ MODELS.push({
 });
 
 /* ============================================================
-   MODELS 2–5 GO HERE. Follow the pattern above exactly:
+   MODEL 2 — Membrane Transport (Level 6)
+   Bilayer cross-section with a channel, a carrier, a pump, and
+   cholesterol. Floating molecules show which of them cross
+   unaided and which need help — and at what cost.
+   ============================================================ */
+MODELS.push({
+  id:'transport',
+  name:'2 · Membrane Transport',
+  level:'Level 6 · 3.1.9-12.B',
+  hint:'Drag to rotate · click a protein · toggle the gradient top-right',
+  radius:24,
+  build:function(ctx){
+    var add=ctx.add, g=ctx.group, self=this;
+    self._mode = self._mode || 'down';
+
+    var HEAD=0xF0A73A, TAIL=0xB98BFF, BOND=0xD9D2E6,
+        CHANNEL=0x8FA8E8, CARRIER=0xE87FB0, PUMP=0x9B5FE0,
+        CHOL=0x7BC47F, NA=0xE0417B, K=0x2FB8A0,
+        OATOM=0xEFE9F7, CATOM=0x5E5678;
+
+    var CH_X=-5, CAR_X=-1, PUMP_X=3.5;
+
+    /* ---------- bilayer: two leaflets, heads out, tails in ---------- */
+    function lipid(x,z,side){
+      var grp=new THREE.Group();
+      var head=ball(0.30,HEAD,14); head.position.set(0,side*1.3,0);
+      grp.add(head);
+      [-0.15,0.15].forEach(function(dx){
+        var tail=rod(0.085,1.15,TAIL);
+        tail.position.set(dx,side*0.62,0);
+        grp.add(tail);
+      });
+      grp.position.set(x,0,z);
+      return grp;
+    }
+    var bilayer=new THREE.Group();
+    for(var x=-7.6; x<=7.6; x+=0.8){
+      if(Math.abs(x-CH_X)<1.0 || Math.abs(x-CAR_X)<1.0 || Math.abs(x-PUMP_X)<1.5) continue;
+      var lz=(Math.random()-0.5)*0.3;
+      bilayer.add(lipid(x,lz,1));
+      bilayer.add(lipid(x,lz,-1));
+    }
+    add(bilayer, {tag:'Membrane', title:'Phospholipid bilayer',
+      body:'Phosphate heads face the water on both sides; fatty-acid tails pack together in between, away from water. That hydrophobic core is the barrier — small nonpolar molecules slip through the tails, but ions and sugars cannot cross it unaided.'});
+
+    /* ---------- channel protein: an open pore ---------- */
+    var chGroup=new THREE.Group();
+    for(var ri=0; ri<5; ri++){
+      var ring=new THREE.Mesh(new THREE.TorusGeometry(0.5,0.16,10,24), mat(CHANNEL));
+      ring.rotation.x=Math.PI/2; ring.position.y=(ri-2)*0.5;
+      chGroup.add(ring);
+    }
+    var chOut=ball(0.55,CHANNEL,18); chOut.position.y=1.4; chGroup.add(chOut);
+    var chIn=ball(0.6,CHANNEL,18); chIn.position.y=-1.45; chGroup.add(chIn);
+    chGroup.position.set(CH_X,0,0);
+    add(chGroup, {tag:'Membrane protein', title:'Channel protein',
+      body:'A permanently open pore lined with polar and charged residues that lets one specific ion pass down its own concentration gradient. No energy is spent — this is facilitated diffusion, and it only runs one direction: with the gradient.'});
+
+    /* ---------- carrier protein: binds, flexes, releases ---------- */
+    var carGroup=new THREE.Group();
+    var carTrunk=capsule(0.45,2.5,CARRIER); carGroup.add(carTrunk);
+    var pocket=ball(0.38,CARRIER,16); pocket.position.set(0,0.15,0.32); carGroup.add(pocket);
+    carGroup.position.set(CAR_X,0,0);
+    add(carGroup, {tag:'Membrane protein', title:'Carrier protein (facilitated diffusion)',
+      body:'Binds glucose on one face, flexes through a conformational change, and releases it on the other — never opening a straight-through channel. Still passive: glucose only moves from high concentration to low, and the carrier just makes a crossing that would otherwise be too slow fast enough to matter.'});
+
+    /* ---------- sodium-potassium pump ---------- */
+    var pumpGroup=new THREE.Group();
+    var pTrunk=rod(0.55,3.0,PUMP); pumpGroup.add(pTrunk);
+    var pOut=ball(0.65,PUMP,18); pOut.position.y=1.15; pumpGroup.add(pOut);
+    var pIn=ball(0.78,PUMP,18); pIn.position.y=-1.2; pumpGroup.add(pIn);
+    pumpGroup.position.set(PUMP_X,0,0);
+    add(pumpGroup, {tag:'Membrane protein', title:'Sodium–potassium pump',
+      body:'Binds 3 Na⁺ inside the cell; ATP hydrolysis (ATP → ADP + phosphate) flexes the pump to release them outside — against their own gradient, since Na⁺ is already more concentrated there. The same shift then binds 2 K⁺ outside and releases them inside. One ATP spent per cycle to move both ions the ‘wrong’ way.'});
+
+    /* ---------- cholesterol ---------- */
+    [-6.4, 0.6, 6.2].forEach(function(cx){
+      var chol=new THREE.Group();
+      var cbody=rod(0.11,0.9,CHOL); chol.add(cbody);
+      var chead=ball(0.16,CHOL,12); chead.position.y=0.5; chol.add(chead);
+      chol.position.set(cx, 0.15, 0.25);
+      add(chol, {tag:'Membrane component', title:'Cholesterol',
+        body:'Wedged between the fatty tails, cholesterol keeps the membrane fluid when it is cold (stopping the tails from packing too tightly) and stiffens it when it is warm — a buffer that holds fluidity roughly constant across a range of temperatures.'});
+    });
+
+    /* ---------- floating molecules (not clickable — see hint) ---------- */
+    function diatomic(hex,r,bond){
+      var grp=new THREE.Group();
+      var a=ball(r,hex,12); a.position.x=-bond/2; grp.add(a);
+      var b=ball(r,hex,12); b.position.x= bond/2; grp.add(b);
+      var rd=rod(0.05,bond,BOND); rd.rotation.z=Math.PI/2; grp.add(rd);
+      return grp;
+    }
+    function co2mesh(){
+      var grp=new THREE.Group();
+      grp.add(ball(0.17,CATOM,12));
+      [-0.34,0.34].forEach(function(dx){
+        var o=ball(0.18,OATOM,12); o.position.x=dx; grp.add(o);
+        var rd=rod(0.05,0.34,BOND); rd.rotation.z=Math.PI/2; rd.position.x=dx/2; grp.add(rd);
+      });
+      return grp;
+    }
+    function glucoseMesh(){
+      var grp=new THREE.Group();
+      grp.add(new THREE.Mesh(new THREE.TorusGeometry(0.26,0.09,10,20), mat(CARRIER)));
+      for(var oi=0; oi<3; oi++){
+        var oh=ball(0.09,OATOM,8); var oa=oi*2.1;
+        oh.position.set(Math.cos(oa)*0.34,Math.sin(oa)*0.34,0.12);
+        grp.add(oh);
+      }
+      return grp;
+    }
+    function ion(hex,r){ return ball(r,hex,16); }
+
+    var movers=[];
+    function laneOK(lx){ return Math.abs(lx-CH_X)>1.1 && Math.abs(lx-CAR_X)>1.1 && Math.abs(lx-PUMP_X)>1.6; }
+    function randLane(){ var lx; do{ lx=-7+Math.random()*14; }while(!laneOK(lx)); return lx; }
+    function addMover(mesh,type,mx,mz,phase,speed,side){
+      g.add(mesh);
+      movers.push({mesh:mesh,type:type,x:mx,z:mz,phase:phase,speed:speed,side:side||1});
+    }
+
+    for(var gi=0; gi<5; gi++){
+      var gm = gi%2 ? co2mesh() : diatomic(OATOM,0.18,0.30);
+      addMover(gm,'free', randLane(), (Math.random()-0.5)*1.6, Math.random()*6.3, 0.32+Math.random()*0.12);
+    }
+    for(var ni=0; ni<2; ni++) addMover(ion(NA,0.20),'free', CH_X+(ni-0.5)*0.35, (Math.random()-0.5)*0.4, Math.random()*6.3, 0.30);
+    for(var ki=0; ki<2; ki++) addMover(ion(K,0.26),'free', CH_X+(ki-0.5)*0.35, (Math.random()-0.5)*0.4+0.5, Math.random()*6.3, 0.30);
+    for(var nb=0; nb<2; nb++) addMover(ion(NA,0.20),'blocked', randLane(), (Math.random()-0.5)*1.6, Math.random()*6.3, 0.4+Math.random()*0.15, Math.random()<0.5?1:-1);
+    for(var kb=0; kb<2; kb++) addMover(ion(K,0.26),'blocked', randLane(), (Math.random()-0.5)*1.6, Math.random()*6.3, 0.4+Math.random()*0.15, Math.random()<0.5?1:-1);
+    for(var gu=0; gu<2; gu++) addMover(glucoseMesh(),'free', CAR_X+(gu-0.5)*0.3, (Math.random()-0.5)*0.3, Math.random()*6.3, 0.26);
+    addMover(glucoseMesh(),'blocked', randLane(), (Math.random()-0.5)*1.4, Math.random()*6.3, 0.35, Math.random()<0.5?1:-1);
+
+    self._movers = movers;
+
+    /* ---------- pump ion cycle state (separate from the free/blocked movers) ---------- */
+    var pna=[], pk=[];
+    for(var p3=0; p3<3; p3++){ var n=ion(NA,0.20); n.position.set(PUMP_X+(p3-1)*0.32,-1.6,(p3-1)*0.15); g.add(n); pna.push(n); }
+    for(var q3=0; q3<2; q3++){ var k2=ion(K,0.26); k2.position.set(PUMP_X+(q3-0.5)*0.32,1.7,(q3-0.5)*0.15); g.add(k2); pk.push(k2); }
+    var atp=ball(0.22,0xF0A73A,14); atp.position.set(PUMP_X+1.0,-1.6,0.6); g.add(atp);
+    var piAtom=ball(0.10,OATOM,10); piAtom.position.set(PUMP_X+1.4,-1.6,0.6); piAtom.visible=false; g.add(piAtom);
+    self._pump = {na:pna, k:pk, atp:atp, pi:piAtom};
+
+    /* ---------- gradient toggle: plain button appended to #bar ---------- */
+    var btn = document.getElementById('gradientToggle');
+    if(!btn){
+      btn = document.createElement('button');
+      btn.id='gradientToggle'; btn.className='btn ghost';
+      document.getElementById('bar').insertBefore(btn, document.getElementById('lvl'));
+      btn.onclick=function(){
+        self._mode = self._mode==='down' ? 'against' : 'down';
+        btn.textContent = self._mode==='down' ? 'Passive · down the gradient' : 'Active · against the gradient (ATP)';
+      };
+    }
+    btn.setAttribute('data-model-ui','transport');
+    btn.textContent = self._mode==='down' ? 'Passive · down the gradient' : 'Active · against the gradient (ATP)';
+  },
+  tick:function(t){
+    var self=this;
+    function tri(ph,a,b,c,d){
+      if(ph<a) return 0;
+      if(ph<b) return (ph-a)/(b-a);
+      if(ph<c) return 1;
+      if(ph<d) return 1-(ph-c)/(d-c);
+      return 0;
+    }
+    (self._movers||[]).forEach(function(m){
+      if(m.type==='free'){
+        m.mesh.position.set(m.x, 6.2*Math.sin(t*m.speed+m.phase), m.z);
+      } else {
+        var p=(Math.sin(t*m.speed+m.phase)+1)/2;
+        m.mesh.position.set(m.x, m.side*(0.55+p*5.6), m.z);
+      }
+    });
+    var pump=self._pump;
+    if(pump){
+      var cyc=6.0, ph=(t%cyc)/cyc;
+      if(self._mode==='against'){
+        var naOut=tri(ph,0,0.32,0.85,0.97);
+        pump.na.forEach(function(n){ n.position.y = -1.6 + naOut*3.3; });
+        var kIn=tri(ph,0.42,0.72,0.80,0.94);
+        pump.k.forEach(function(k){ k.position.y = 1.7 - kIn*3.3; });
+        pump.atp.material.color.setHex(ph>=0.30 && ph<0.75 ? 0xB8842A : 0xF0A73A);
+        pump.pi.visible = ph>=0.30 && ph<0.55;
+        if(pump.pi.visible) pump.pi.position.y = -1.3 + (ph-0.30)*2.0;
+      } else {
+        pump.na.forEach(function(n){ n.position.y=1.7; });
+        pump.k.forEach(function(k){ k.position.y=-1.6; });
+        pump.atp.material.color.setHex(0xF0A73A);
+        pump.pi.visible=false;
+      }
+    }
+  }
+});
+
+/* ============================================================
+   MODELS 3–5 GO HERE. Follow the pattern above exactly:
    MODELS.push({ id, name, level, hint, radius, build(ctx), tick? })
 
-   2 · Membrane Transport      — Levels 6   — 3.1.9-12.B
    3 · DNA to Protein          — Levels 14,15 — 3.1.9-12.A
    4 · Enzyme & Inhibitor      — Level 7   — 3.2.9-12.E
    5 · Mitosis & Meiosis       — Levels 17,18 — 3.1.9-12.D/Q
