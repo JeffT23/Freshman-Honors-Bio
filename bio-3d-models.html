@@ -279,6 +279,15 @@ function capsule(r, len, hex, opts){
   var b = new THREE.Mesh(new THREE.SphereGeometry(r,20,16), m); b.position.y = -len/2;
   g.add(body,a,b); return g;
 }
+/* a rod stretched and rotated to run between two arbitrary points */
+function segment(p1, p2, r, hex){
+  var dir = new THREE.Vector3().subVectors(p2, p1);
+  var len = Math.max(dir.length(), 0.001);
+  var m = rod(r, len, hex);
+  m.position.copy(p1).addScaledVector(dir, 0.5);
+  m.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), dir.clone().normalize());
+  return m;
+}
 
 /* ============================================================
    MODEL 1 — Cell Explorer (Level 4 & 5)
@@ -603,10 +612,251 @@ MODELS.push({
 });
 
 /* ============================================================
-   MODELS 3–5 GO HERE. Follow the pattern above exactly:
+   MODEL 3 — DNA to Protein (Levels 14–15)
+   Three linked scenes on one timeline — double helix, transcription,
+   translation — advanced by a Step button appended to #bar.
+   ============================================================ */
+MODELS.push({
+  id:'dna',
+  name:'3 · DNA to Protein',
+  level:'Levels 14–15 · 3.1.9-12.A',
+  hint:'Click a base pair for its bond count · press Step (top-right) to move through transcription and translation',
+  radius:32,
+  build:function(ctx){
+    var g=ctx.group, self=this;
+    if(self._step===undefined) self._step=0;
+
+    function pick(container, info){
+      container.userData.info=info;
+      container.traverse(function(o){ if(o!==container && o.isMesh) PICKABLE.push(o); });
+    }
+    function nucColor(b){
+      return b==='A'?0xE0417B : b==='T'?0x8FA8E8 : b==='G'?0xF0A73A : b==='C'?0x2FB8A0 : 0xB98BFF; /* U */
+    }
+
+    /* ---------- gene sequence: ATG GGT TTT TAA -> Met-Gly-Phe-Stop ---------- */
+    var SENSE=['A','T','G','G','G','T','T','T','T','T','A','A'];
+    var COMP={A:'T',T:'A',G:'C',C:'G'};
+    var TEMPLATE=SENSE.map(function(b){ return COMP[b]; });
+    var TRX={A:'U',T:'A',G:'C',C:'G'};
+    var MRNA=TEMPLATE.map(function(b){ return TRX[b]; });
+    var N=SENSE.length;
+    var CODONS=[[0,1,2],[3,4,5],[6,7,8],[9,10,11]];
+    var AMINO_COLOR=[0x7BC47F,0xD98C4A,0x4A8FD9,null]; /* Met, Gly, Phe, Stop */
+    var ANTICODON=['CAU','ACC','AAA',null];
+
+    /* ============================================================
+       SCENE 1 — double helix
+       ============================================================ */
+    var helixGroup=new THREE.Group(); helixGroup.position.set(-8,0,0); g.add(helixGroup);
+
+    var outerR=1.9, innerR=1.1, rise=0.85, twist=Math.PI/5;
+    var totalH=(N-1)*rise;
+    var s1pts=[], s2pts=[], pairData=[];
+
+    for(var i=0;i<N;i++){
+      var a=i*twist, y=i*rise-totalH/2;
+      s1pts.push(new THREE.Vector3(outerR*Math.cos(a), y, outerR*Math.sin(a)));
+      s2pts.push(new THREE.Vector3(outerR*Math.cos(a+Math.PI), y, outerR*Math.sin(a+Math.PI)));
+      var i1=new THREE.Vector3(innerR*Math.cos(a), y, innerR*Math.sin(a));
+      var i2=new THREE.Vector3(innerR*Math.cos(a+Math.PI), y, innerR*Math.sin(a+Math.PI));
+
+      var base1=SENSE[i], base2=TEMPLATE[i];
+      var bonds = (base1+base2==='GC'||base1+base2==='CG') ? 3 : 2;
+      var pairGrp=new THREE.Group();
+      var nb1=ball(0.24,nucColor(base1),14); nb1.position.copy(i1); pairGrp.add(nb1);
+      var nb2=ball(0.24,nucColor(base2),14); nb2.position.copy(i2); pairGrp.add(nb2);
+      for(var h=0; h<bonds; h++){
+        var dot=ball(0.08,0xEFE9F7,8);
+        dot.position.lerpVectors(i1,i2,(h+1)/(bonds+1));
+        pairGrp.add(dot);
+      }
+      pick(pairGrp, {tag:'Double helix', title:(bonds===3?'G–C':'A–T')+' base pair',
+        body: bonds===3
+          ? 'G–C pair, held by 3 hydrogen bonds — one more than A–T, so G–C-rich DNA needs more heat to melt apart. The same pairing rule keeps every base on one strand matched to its complement on the other.'
+          : 'A–T pair, held by 2 hydrogen bonds — the weaker of the two pairings, which is part of why A/T-rich regions separate first when DNA is unwound for replication or transcription.'});
+      helixGroup.add(pairGrp);
+      pairData.push({i1:i1, i2:i2, nb1:nb1, nb2:nb2, dots:pairGrp.children.slice(2), y:y});
+    }
+    var backbone1=new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(s1pts),80,0.18,8,false), mat(0x6B4BA8));
+    var backbone2=new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(s2pts),80,0.18,8,false), mat(0x8A82A0));
+    helixGroup.add(backbone1, backbone2);
+
+    /* ---------- RNA polymerase ---------- */
+    var poly=new THREE.Group();
+    var polyBody=ball(0.85,0xE07BA0,20); polyBody.scale.set(1.1,0.8,1.0); poly.add(polyBody);
+    pick(poly, {tag:'Transcription', title:'RNA polymerase',
+      body:'Unwinds the double helix just ahead of it and reads the template strand 3’→5’, synthesizing a new mRNA strand 5’→3’ by pairing each template base with its complement — using U in place of T.'});
+    poly.position.set(0, -totalH/2, outerR+0.6);
+    helixGroup.add(poly);
+
+    /* ---------- mRNA growing alongside the template (revealed in Step 2) ---------- */
+    var mrnaBases=[], mrnaSegs=[], mrnaPts=[];
+    for(var mi=0; mi<N; mi++){
+      var d=pairData[mi];
+      var dir=d.i2.clone().sub(new THREE.Vector3(0,d.y,0)).normalize();
+      var mp=new THREE.Vector3(0,d.y,0).addScaledVector(dir, innerR+0.55);
+      mrnaPts.push(mp);
+      var mb=ball(0.20,nucColor(MRNA[mi]),12); mb.position.copy(mp); mb.visible=false;
+      helixGroup.add(mb); mrnaBases.push(mb);
+    }
+    for(var ms=1; ms<N; ms++){
+      var mseg=segment(mrnaPts[ms-1],mrnaPts[ms],0.06,0x5E5678); mseg.visible=false;
+      helixGroup.add(mseg); mrnaSegs.push(mseg);
+    }
+    self._helix={pairData:pairData, poly:poly, mrnaBases:mrnaBases, mrnaSegs:mrnaSegs, totalH:totalH, rise:rise};
+
+    /* ============================================================
+       SCENE 2 — translation
+       ============================================================ */
+    var transGroup=new THREE.Group(); transGroup.position.set(7,0,0); g.add(transGroup);
+
+    var spacing=0.55, startX=-(N-1)*spacing/2;
+    var mrna2Pts=[], mrna2Meshes=[];
+    for(var ti=0; ti<N; ti++){
+      var tp=new THREE.Vector3(startX+ti*spacing, 0, 0); mrna2Pts.push(tp);
+      var tb=ball(0.20,nucColor(MRNA[ti]),12); tb.position.copy(tp); tb.visible=false;
+      transGroup.add(tb); mrna2Meshes.push(tb);
+    }
+    for(var ts=1; ts<N; ts++){
+      var tseg=segment(mrna2Pts[ts-1],mrna2Pts[ts],0.06,0x5E5678); tseg.visible=false;
+      transGroup.add(tseg); mrna2Meshes.push(tseg);
+    }
+
+    var ribosomeBody=new THREE.Group();
+    var largeSub=ball(1.6,0x8A6FBF,24); largeSub.scale.set(1.3,0.85,1.1); largeSub.position.y=0.85;
+    var smallSub=ball(1.3,0xC9BEDD,24); smallSub.scale.set(1.3,0.7,1.0); smallSub.position.y=-0.7;
+    ribosomeBody.add(largeSub,smallSub);
+    pick(ribosomeBody, {tag:'Translation', title:'Ribosome',
+      body:'A large and a small subunit clamp around the mRNA and read it three bases — one codon — at a time. Each codon is matched to an incoming tRNA by base-pairing with its anticodon, and the ribosome catalyzes a peptide bond between the growing chain and the new amino acid.'});
+    ribosomeBody.visible=false;
+    ribosomeBody.position.x = (mrna2Pts[0].x+mrna2Pts[2].x)/2;
+    transGroup.add(ribosomeBody);
+
+    function codonCenterX(ci){ var idx=CODONS[ci]; return (mrna2Pts[idx[0]].x+mrna2Pts[idx[2]].x)/2; }
+    function makeTRNA(ci){
+      var grp=new THREE.Group();
+      grp.add(capsule(0.22,1.1,0xEFE9F7));
+      var anticodon=ANTICODON[ci];
+      if(anticodon){
+        for(var k=0;k<3;k++){
+          var db=ball(0.14,nucColor(anticodon[k]),10);
+          db.position.set((k-1)*0.28,-0.75,0);
+          grp.add(db);
+        }
+      }
+      if(AMINO_COLOR[ci]){ var aa=ball(0.28,AMINO_COLOR[ci],14); aa.position.y=0.85; grp.add(aa); }
+      return grp;
+    }
+
+    self._trans={
+      ribosomeBody:ribosomeBody, codonCenterX:codonCenterX, makeTRNA:makeTRNA, transGroup:transGroup,
+      mrna2Meshes:mrna2Meshes, peptideAnchor:new THREE.Vector3(codonCenterX(0), 2.7, 0),
+      peptide:[], peptideSegs:[], AMINO_COLOR:AMINO_COLOR,
+      currentTRNA:null, lastStep:-1, slideFromX:codonCenterX(0), slideToX:codonCenterX(0)
+    };
+
+    /* ---------- step button ---------- */
+    var LABELS=['Step 1/6 · Double helix ▶','Step 2/6 · Transcription ▶',
+      'Step 3/6 · Initiation: AUG → Met ▶','Step 4/6 · Elongation: GGU → Gly ▶',
+      'Step 5/6 · Elongation: UUU → Phe ▶','Step 6/6 · Termination: UAA, stop ▶'];
+    var btn=document.getElementById('dnaStep');
+    if(!btn){
+      btn=document.createElement('button');
+      btn.id='dnaStep'; btn.className='btn';
+      document.getElementById('bar').insertBefore(btn, document.getElementById('lvl'));
+      btn.onclick=function(){
+        self._step=(self._step+1)%6;
+        self._stepStart=null;
+        btn.textContent=LABELS[self._step];
+      };
+    }
+    btn.setAttribute('data-model-ui','dna');
+    btn.textContent=LABELS[self._step];
+    self._stepStart=null;
+  },
+  tick:function(t){
+    var self=this;
+    if(self._stepStart===null || self._stepStart===undefined) self._stepStart=t;
+    var lt=t-self._stepStart, step=self._step;
+    var helix=self._helix, trans=self._trans;
+    if(!helix || !trans) return;
+
+    /* ---------- Step 1: transcription reveal ---------- */
+    var unzipIdx = step>=1 ? Math.min(helix.pairData.length, Math.floor(lt/0.45)) : 0;
+    for(var i=0;i<helix.pairData.length;i++){
+      var d=helix.pairData[i];
+      var unzipped = step>=1 && i<unzipIdx;
+      for(var dj=0; dj<d.dots.length; dj++) d.dots[dj].visible=!unzipped;
+      if(unzipped){
+        d.nb1.position.set(d.i1.x*1.6, d.i1.y, d.i1.z*1.6);
+        d.nb2.position.set(d.i2.x*1.6, d.i2.y, d.i2.z*1.6);
+      } else {
+        d.nb1.position.copy(d.i1);
+        d.nb2.position.copy(d.i2);
+      }
+      helix.mrnaBases[i].visible = step>=1 && unzipIdx>i;
+      if(i>0) helix.mrnaSegs[i-1].visible = step>=1 && unzipIdx>i;
+    }
+    helix.poly.visible = step>=1;
+    if(step>=1) helix.poly.position.y = Math.min(helix.pairData.length-1,unzipIdx)*helix.rise - helix.totalH/2;
+
+    /* ---------- Steps 2-5: translation ---------- */
+    trans.ribosomeBody.visible = step>=2;
+    trans.mrna2Meshes.forEach(function(m){ m.visible = step>=2; });
+    trans.peptide.forEach(function(p){ p.visible = step>=2; });
+    trans.peptideSegs.forEach(function(s){ s.visible = step>=2; });
+    if(trans.currentTRNA) trans.currentTRNA.visible = step>=2;
+    if(step>=2){
+      var codonIdx=step-2;
+      if(trans.lastStep!==step){
+        trans.lastStep=step;
+        trans.slideFromX=trans.ribosomeBody.position.x;
+        trans.slideToX=trans.codonCenterX(codonIdx);
+
+        if(trans.currentTRNA){ trans.transGroup.remove(trans.currentTRNA); trans.currentTRNA=null; }
+        if(codonIdx<3){
+          var nt=trans.makeTRNA(codonIdx);
+          nt.position.set(trans.slideToX,3.0,0);
+          trans.transGroup.add(nt);
+          trans.currentTRNA=nt;
+        }
+
+        var needed=Math.min(codonIdx+1,3);
+        while(trans.peptide.length<needed){
+          var k=trans.peptide.length;
+          var aa=ball(0.28, trans.AMINO_COLOR[k], 14);
+          var apos=trans.peptideAnchor.clone(); apos.y+=k*0.55;
+          aa.position.copy(apos);
+          trans.transGroup.add(aa);
+          if(trans.peptide.length){
+            var pseg=segment(trans.peptide[trans.peptide.length-1].position, aa.position, 0.09, 0xB8842A);
+            pseg.userData.baseY=pseg.position.y;
+            trans.transGroup.add(pseg);
+            trans.peptideSegs.push(pseg);
+          }
+          trans.peptide.push(aa);
+        }
+        if(codonIdx===3) trans.releaseStart=t;
+      }
+      var slideT=Math.min(1, lt/1.0);
+      trans.ribosomeBody.position.x = trans.slideFromX + (trans.slideToX-trans.slideFromX)*slideT;
+      if(trans.currentTRNA) trans.currentTRNA.position.y = 3.0 + (0.05-3.0)*Math.min(1, lt/0.9);
+      if(codonIdx===3 && trans.releaseStart!==undefined){
+        var relT=Math.min(1,(t-trans.releaseStart)/1.4);
+        trans.peptide.forEach(function(p,k){ p.position.y = trans.peptideAnchor.y + k*0.55 + relT*1.8; });
+        trans.peptideSegs.forEach(function(s){ s.position.y = s.userData.baseY + relT*1.8; });
+      }
+    } else {
+      trans.lastStep=-1;
+    }
+  }
+});
+
+/* ============================================================
+   MODELS 4–5 GO HERE. Follow the pattern above exactly:
    MODELS.push({ id, name, level, hint, radius, build(ctx), tick? })
 
-   3 · DNA to Protein          — Levels 14,15 — 3.1.9-12.A
    4 · Enzyme & Inhibitor      — Level 7   — 3.2.9-12.E
    5 · Mitosis & Meiosis       — Levels 17,18 — 3.1.9-12.D/Q
    ============================================================ */
