@@ -628,6 +628,7 @@ MODELS.push({
 
     function pick(container, info){
       container.userData.info=info;
+      if(container.isMesh) PICKABLE.push(container);
       container.traverse(function(o){ if(o!==container && o.isMesh) PICKABLE.push(o); });
     }
     function nucColor(b){
@@ -854,10 +855,164 @@ MODELS.push({
 });
 
 /* ============================================================
-   MODELS 4–5 GO HERE. Follow the pattern above exactly:
+   MODEL 4 — Enzyme & Inhibitor (Level 7)
+   Two-lobed enzyme (beta-lactamase) whose cleft IS the active site —
+   no boolean geometry needed. A Step button cycles the ligand shown
+   (substrate / competitive inhibitor / noncompetitive inhibitor); a
+   temperature slider denatures the enzyme past its optimum.
+   ============================================================ */
+MODELS.push({
+  id:'enzyme',
+  name:'4 · Enzyme & Inhibitor',
+  level:'Level 7 · 3.2.9-12.E',
+  hint:'Click the enzyme or a ligand · Step (top-right) switches substrate/inhibitor · drag the slider past ~42°C to denature it',
+  radius:11,
+  build:function(ctx){
+    var g=ctx.group, self=this;
+    if(self._step===undefined) self._step=0;
+    if(self._temp===undefined) self._temp=37;
+
+    function pick(container, info){
+      container.userData.info=info;
+      if(container.isMesh) PICKABLE.push(container);
+      container.traverse(function(o){ if(o!==container && o.isMesh) PICKABLE.push(o); });
+    }
+
+    /* ---------- enzyme: two lobes, the gap between them is the active-site cleft ---------- */
+    var profile=[
+      new THREE.Vector2(0.00,-1.00), new THREE.Vector2(0.50,-0.90), new THREE.Vector2(0.85,-0.50),
+      new THREE.Vector2(0.95, 0.00), new THREE.Vector2(0.80, 0.50), new THREE.Vector2(0.45, 0.85),
+      new THREE.Vector2(0.00, 1.00)
+    ];
+    var lobeGeo=new THREE.LatheGeometry(profile,24);
+    var healthyColor=new THREE.Color(0xB8935C), denaturedColor=new THREE.Color(0x8A8272);
+    var lobeMat=mat(0xB8935C, {rough:0.6});
+    var lobeA=new THREE.Mesh(lobeGeo,lobeMat); lobeA.position.x=-1.05;
+    var lobeB=new THREE.Mesh(lobeGeo,lobeMat); lobeB.position.x=1.05;
+    var enzymeGroup=new THREE.Group(); enzymeGroup.add(lobeA,lobeB); g.add(enzymeGroup);
+    pick(enzymeGroup, {tag:'Enzyme', title:'Beta-lactamase',
+      body:'A bacterial enzyme whose two lobes form a cleft shaped to fit the four-membered beta-lactam ring found in penicillin and related antibiotics. Catalysis depends entirely on that shape — heat the enzyme past its optimum and the cleft loses its shape completely, which is exactly what ‘denatured’ means.'});
+
+    /* ---------- substrate: penicillin (beta-lactam ring + thiazolidine ring + tail) ---------- */
+    var subInfo={tag:'Substrate', title:'Penicillin',
+      body:'The four-membered beta-lactam ring (highlighted) is the reactive part of every penicillin-class antibiotic — it strains a bond that a bacterial cell-wall-building enzyme needs intact. Beta-lactamase recognizes that same ring, but instead of being blocked by it, hydrolyzes it open, destroying the drug before it can act.'};
+    var ringA=new THREE.Mesh(new THREE.TorusGeometry(0.22,0.05,8,16), mat(0xE0417B));
+    var bodyGrp=new THREE.Group();
+    var ringB=new THREE.Mesh(new THREE.TorusGeometry(0.28,0.06,8,20), mat(0x8FA8E8)); ringB.position.x=0.42; ringB.rotation.y=0.3;
+    var tail=rod(0.06,0.6,0xF0A73A); tail.rotation.z=Math.PI/2; tail.position.x=0.85;
+    bodyGrp.add(ringB,tail);
+    g.add(ringA,bodyGrp);
+    pick(ringA,subInfo); pick(bodyGrp,subInfo);
+
+    /* ---------- competitive inhibitor: clavulanic acid stand-in ---------- */
+    var compMesh=new THREE.Mesh(new THREE.BoxGeometry(0.55,0.4,0.45), mat(0xCC4444));
+    g.add(compMesh);
+    pick(compMesh, {tag:'Competitive inhibitor', title:'Competitive inhibitor (e.g., clavulanic acid)',
+      body:'Resembles the substrate closely enough to occupy the same active-site cleft, physically outcompeting penicillin for it. Clavulanic acid goes further — it reacts once bound and permanently jams the enzyme, which is why it’s paired with amoxicillin in drugs like Augmentin.'});
+
+    /* ---------- noncompetitive (allosteric) inhibitor ---------- */
+    var nonMesh=new THREE.Mesh(new THREE.TorusKnotGeometry(0.22,0.08,80,10,2,3), mat(0x9B5FE0));
+    g.add(nonMesh);
+    pick(nonMesh, {tag:'Noncompetitive inhibitor', title:'Noncompetitive (allosteric) inhibitor',
+      body:'Binds a site away from the active cleft entirely — but the enzyme is one connected structure, so binding there still pulls the cleft out of shape. It can’t be outcompeted by more substrate, because it was never competing for the same site: the active site itself gets deformed, whether substrate is present or not.'});
+
+    self._enz={
+      lobeA:lobeA, lobeB:lobeB, lobeMat:lobeMat, healthyColor:healthyColor, denaturedColor:denaturedColor,
+      ringA:ringA, bodyGrp:bodyGrp, compMesh:compMesh, nonMesh:nonMesh
+    };
+
+    /* ---------- Step button (which ligand) ---------- */
+    var LABELS=['Substrate: penicillin ▶','Competitive inhibitor ▶','Noncompetitive inhibitor ▶'];
+    var btn=document.getElementById('enzStep');
+    if(!btn){
+      btn=document.createElement('button');
+      btn.id='enzStep'; btn.className='btn';
+      document.getElementById('bar').insertBefore(btn, document.getElementById('lvl'));
+      btn.onclick=function(){ self._step=(self._step+1)%3; btn.textContent=LABELS[self._step]; };
+    }
+    btn.setAttribute('data-model-ui','enzyme');
+    btn.textContent=LABELS[self._step];
+
+    /* ---------- temperature slider ---------- */
+    var tempWrap=document.getElementById('enzTempWrap');
+    if(!tempWrap){
+      tempWrap=document.createElement('span');
+      tempWrap.id='enzTempWrap';
+      tempWrap.style.cssText='display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--page-mute)';
+      var lab=document.createElement('span'); lab.textContent='Temp';
+      var slider=document.createElement('input');
+      slider.type='range'; slider.id='enzTemp'; slider.min='20'; slider.max='80'; slider.step='1';
+      slider.style.cssText='width:110px;vertical-align:middle;accent-color:#E0417B';
+      var val=document.createElement('span'); val.id='enzTempVal';
+      val.style.cssText='font-family:var(--mono);font-size:11px;min-width:36px;display:inline-block';
+      tempWrap.appendChild(lab); tempWrap.appendChild(slider); tempWrap.appendChild(val);
+      document.getElementById('bar').insertBefore(tempWrap, document.getElementById('lvl'));
+      slider.oninput=function(){ self._temp=parseInt(slider.value,10); val.textContent=self._temp+'°C'; };
+    }
+    tempWrap.setAttribute('data-model-ui','enzyme');
+    document.getElementById('enzTemp').value=self._temp;
+    document.getElementById('enzTempVal').textContent=self._temp+'°C';
+  },
+  tick:function(t){
+    var self=this, enz=self._enz;
+    if(!enz) return;
+    var step=self._step, denature=Math.max(0,Math.min(1,(self._temp-42)/38));
+
+    var CYCLE=5.0, phase=(t%CYCLE)/CYCLE;
+
+    /* ---------- lobes: induced fit / allosteric deform / denaturation ---------- */
+    var closeAmt=0;
+    if(step===0 && denature<0.15){
+      if(phase>=0.25 && phase<0.55) closeAmt=(phase-0.25)/0.30;
+      else if(phase>=0.55 && phase<0.9) closeAmt=1-(phase-0.55)/0.35;
+    }
+    var ax=-1.05+closeAmt*0.15, bx=1.05-closeAmt*0.15, arz=0, brz=0;
+    if(step===2){
+      var bound=0;
+      if(phase>=0.25 && phase<0.9) bound=Math.min(1,(phase-0.25)/0.15);
+      if(phase>=0.9) bound=Math.max(0,1-(phase-0.9)/0.10);
+      brz=-bound*0.55; bx+=bound*0.35;
+    }
+    ax-=denature*1.3; arz+=denature*0.6;
+    bx+=denature*0.9; brz-=denature*0.9;
+    enz.lobeA.position.x=ax; enz.lobeA.rotation.z=arz;
+    enz.lobeB.position.x=bx; enz.lobeB.rotation.z=brz;
+    enz.lobeMat.color.lerpColors(enz.healthyColor, enz.denaturedColor, denature);
+
+    /* ---------- active ligand position ---------- */
+    var target = step===2 ? new THREE.Vector3(2.6+denature*0.3, 0.3+denature*1.8, 0.8)
+                           : new THREE.Vector3(0, denature*1.8, 0);
+    var from=target.clone(); from.y=3.4;
+    var pos;
+    if(phase<0.25) pos=from.clone().lerp(target, phase/0.25);
+    else if(phase<0.9) pos=target.clone();
+    else pos=target.clone().lerp(from,(phase-0.9)/0.10);
+
+    var cleaving = step===0 && denature<0.15 && phase>=0.50 && phase<0.62;
+    enz.ringA.material.color.setHex(cleaving?0xFFFFFF:0xE0417B);
+
+    if(step===0 && denature<0.15 && phase>=0.55 && phase<0.9){
+      var sep=(phase-0.55)/0.35;
+      enz.ringA.position.copy(pos).add(new THREE.Vector3(-sep*1.6, sep*0.6, 0));
+      enz.bodyGrp.position.copy(pos).add(new THREE.Vector3(sep*1.6, -sep*0.3, 0));
+      var fade=Math.max(0.15,1-sep*0.85);
+      enz.ringA.scale.setScalar(fade); enz.bodyGrp.scale.setScalar(fade);
+    } else {
+      enz.ringA.position.copy(pos); enz.bodyGrp.position.copy(pos);
+      enz.ringA.scale.setScalar(1); enz.bodyGrp.scale.setScalar(1);
+    }
+
+    enz.ringA.visible = step===0; enz.bodyGrp.visible = step===0;
+    enz.compMesh.visible = step===1; enz.nonMesh.visible = step===2;
+    if(step===1) enz.compMesh.position.copy(pos);
+    if(step===2) enz.nonMesh.position.copy(pos);
+  }
+});
+
+/* ============================================================
+   MODEL 5 GOES HERE. Follow the pattern above exactly:
    MODELS.push({ id, name, level, hint, radius, build(ctx), tick? })
 
-   4 · Enzyme & Inhibitor      — Level 7   — 3.2.9-12.E
    5 · Mitosis & Meiosis       — Levels 17,18 — 3.1.9-12.D/Q
    ============================================================ */
 
