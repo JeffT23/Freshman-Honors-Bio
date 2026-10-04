@@ -248,7 +248,7 @@ function clearRoot(){
     root.remove(c);
     c.traverse(function(o){
       if(o.geometry) o.geometry.dispose();
-      if(o.material){ (Array.isArray(o.material)?o.material:[o.material]).forEach(function(m){m.dispose();}); }
+      if(o.material){ (Array.isArray(o.material)?o.material:[o.material]).forEach(function(m){ if(m.map) m.map.dispose(); m.dispose(); }); }
     });
   }
 }
@@ -428,6 +428,7 @@ function teachKit(self, cfg){
     var glow=0.22+0.16*Math.sin(t*5);
     for(var i=0;i<K.glow.length;i++) K.glow[i].material.emissiveIntensity=glow;
     if(K.quiz && K.quiz.nextAt!==null && t>=K.quiz.nextAt) K.quizNext();
+    if(K.labels.length) K.updateLabels();
     return {dt:dt, at:K.animT, paused:!!(K.focusObj||K.sel||K.quiz)};
   };
 
@@ -450,6 +451,47 @@ function teachKit(self, cfg){
     K.focusPt=null; K.focusObj=null;
     K.startQuiz();
   };
+
+  /* ---------- floating labels: canvas-text sprites at constant screen size, with a toggle ----------
+     Needs cfg.group (the model's group). K.label(obj, text, dy) pins a label dy units above obj. */
+  K.labels=[]; K.labelsOn = cfg.labels!==false;
+  if(cfg.group){ K.labelGroup=new THREE.Group(); cfg.group.add(K.labelGroup); }
+  function drawLabel(c, text){
+    var x=c.getContext('2d'), font='600 26px "Segoe UI",system-ui,sans-serif';
+    x.font=font; var w=Math.ceil(x.measureText(text).width)+30, h=46; c.width=w; c.height=h;
+    x.font=font; x.fillStyle='rgba(28,21,48,0.84)';
+    x.beginPath(); x.moveTo(12,0); x.lineTo(w-12,0); x.arc(w-12,12,12,-Math.PI/2,0); x.lineTo(w,h-12); x.arc(w-12,h-12,12,0,Math.PI/2);
+    x.lineTo(12,h); x.arc(12,h-12,12,Math.PI/2,Math.PI); x.lineTo(0,12); x.arc(12,12,12,Math.PI,Math.PI*1.5); x.closePath(); x.fill();
+    x.fillStyle='#EFE9F7'; x.textBaseline='middle'; x.fillText(text,15,h/2+1);
+    return {w:w, h:h};
+  }
+  K.label = function(obj, text, dy){
+    if(!K.labelGroup) return null;
+    var c=document.createElement('canvas'), d=drawLabel(c,text);
+    var tex=new THREE.CanvasTexture(c); tex.minFilter=THREE.LinearFilter;
+    var sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex, transparent:true, depthTest:false, sizeAttenuation:false}));
+    sp.scale.set(0.032*d.w/d.h, 0.032, 1); sp.renderOrder=10;
+    sp.userData.target=obj; sp.userData.dy=(dy===undefined?0.6:dy); sp.userData.canvas=c;
+    K.labelGroup.add(sp); K.labels.push(sp); return sp;
+  };
+  /* redraw a label's text in place (live readouts) */
+  K.relabel = function(sp, text){
+    if(!sp) return;
+    var d=drawLabel(sp.userData.canvas, text);
+    sp.material.map.needsUpdate=true; sp.scale.set(0.032*d.w/d.h, 0.032, 1);
+  };
+  K.updateLabels = function(){
+    for(var i=0;i<K.labels.length;i++){
+      var sp=K.labels[i], o=sp.userData.target, shown=K.labelsOn;
+      for(var p=o; p && shown; p=p.parent) if(p.visible===false) shown=false;
+      sp.visible=shown; if(!shown) continue;
+      o.getWorldPosition(sp.position); sp.position.y+=sp.userData.dy;
+    }
+  };
+  if(cfg.labels!==undefined){
+    K.labelsBtn=K.button(cfg.id+'Labels','btn ghost', K.labelsOn?'Labels: on':'Labels: off');
+    K.labelsBtn.onclick=function(){ K.labelsOn=!K.labelsOn; K.labelsBtn.textContent=K.labelsOn?'Labels: on':'Labels: off'; };
+  }
   self._K=K;
   return K;
 }
@@ -2092,6 +2134,273 @@ MODELS.push({
     var frac = mode==='mitosis' ? P.PHASE_ANGLE[ph] : (ph==='interphase'?0.22:0.93);
     var an=Math.PI/2-frac*Math.PI*2;
     P.marker.position.set(Math.cos(an)*1.6, Math.sin(an)*1.6, 0.2);
+  }
+});
+
+/* ============================================================
+   MODEL 9 — Selection in a Dish: Antibiotic Resistance (Levels 9, 34)
+   A petri dish of low-poly colonies, a few tagged resistant from the
+   start. A live simulation ticks generations: colonies grow, die,
+   recolonize gaps, occasionally mutate, and pass plasmids to
+   neighbors. Apply a full antibiotic course or stop it early and
+   watch the share of resistant colonies on a generation-by-generation
+   bar strip. A replica plate reproduces the classic experiment. Built
+   on teachKit (Tour, Quiz, Labels); modes: 'dish', 'replica'.
+   ============================================================ */
+MODELS.push({
+  id:'selection',
+  name:'9 · Selection in a Dish',
+  level:'Levels 9, 34 · 3.1.9-12.T/U/W',
+  hint:'Click a colony or the drug · Apply antibiotic / Stop early run the experiment · Tour narrates it',
+  radius:16,
+  build:function(ctx){
+    var g=ctx.group, self=this;
+    var SUS=0xEFE0B8, RES=0xE0417B, GEN=2.2, N=30;
+    self._mode='dish'; self._mut=0.02; self._gen=0; self._lastGen=0; self._history=[];
+    self._pulse=null; self._arc=null; self._modeStart=null;
+
+    var INFO={
+      'susceptible':{tag:'Colony', title:'Susceptible colony',
+        body:'Bacteria the drug can kill — most of the dish starts this way. With no drug around they grow a little faster than resistant ones, because the pumps and enzymes that confer resistance cost energy to make.'},
+      'resistant':{tag:'Colony', title:'Resistant colony',
+        body:'Carries a mutation that defeats the drug: a pump that ejects it, or an enzyme such as beta-lactamase that destroys it. The pink colonies were here before any drug touched the dish. Variation comes first, from random mutation; the drug only decides who survives to reproduce.'},
+      'antibiotic':{tag:'Selection pressure', title:'Antibiotic disc',
+        body:'The drug diffuses out of the disc. It kills bacteria by hitting something only bacteria have — a peptidoglycan wall, a bacterial ribosome, a folate enzyme. Apply it and watch: it changes no colony. It removes the susceptible ones and leaves the resistant ones to fill the gaps. The drug selects; it does not create.'},
+      'agar':{tag:'Environment', title:'Nutrient agar',
+        body:'The environment. Add the drug and the same variants that were barely keeping up become the only ones that reproduce. Fitness is not a fixed property of a bacterium — it is relative to the environment it is in.'},
+      'dish':{tag:'Population', title:'Petri dish',
+        body:'Each colony holds millions of cells, and a generation takes 20–30 minutes. Short generations plus enormous numbers are why bacteria evolve resistance in days while large animals take millennia — the population evolves, never the individual.'},
+      'plasmid':{tag:'Horizontal gene transfer', title:'Plasmid in transit',
+        body:'A plasmid crossing from a resistant colony to a susceptible neighbor by conjugation. The receiver becomes resistant without a single cell division — and it need not even be the same species. This is why resistance spreads sideways, not just down generations.'},
+      'readout':{tag:'Data', title:'Generations · % resistant',
+        body:'One bar per generation; its height is the share of living colonies that are resistant. It jumps after a dose, then drifts back down across drug-free generations as the cost of resistance shows — selection runs both ways.'},
+      'replica':{tag:'Classic experiment', title:'Replica plate',
+        body:'A velvet stamp copies the colony pattern from the original dish onto a plate that contains the drug. Only some positions grow — and the colonies at those same positions on the original were never exposed to anything. Resistance was there before the drug arrived.'},
+      'virus':{tag:'Not a target', title:'Virus',
+        body:'No cell wall, no bacterial ribosomes, no metabolism of its own — nothing an antibiotic can hit. That is why antibiotics do nothing for a cold or flu, and why taking them anyway only selects the bacteria you already carry.'}
+    };
+
+    var STOPS=[
+      {tag:'Variation', focus:'dish', r:16, keys:['resistant'], act:'reset', title:'Variation comes first',
+       body:'A dish of colonies, all descended from one cell — and three are already pink. They carry a random mutation that happens to defeat a drug they have never met. No drug caused it. Every population carries variation like this before selection ever acts.'},
+      {tag:'Mutation', focus:'resistant', r:10, keys:['resistant'], act:'highMut', title:'Where resistance comes from',
+       body:'Watch the dish for a moment: now and then a cream colony flashes pink. Copying errors during division produce resistance mutations at a low, steady rate whether or not any drug is present. Bacteria do not learn and do not try — mutation is random; only survival is not.'},
+      {tag:'Selection', focus:'antibiotic', r:12, keys:['antibiotic','susceptible'], act:'full', title:'Apply the drug',
+       body:'A full dose. The susceptible colonies die; the pink ones are untouched, because the drug targets something they have already changed. Nothing about any colony was altered by the drug. It removed the susceptible and left the rest.'},
+      {tag:'Selection', focus:'readout', r:11, keys:['readout','resistant'], act:'run6', title:'Survivors reproduce',
+       body:'Generations tick on. The resistant survivors spread into the empty agar, and the bar strip climbs: the share of resistant colonies has jumped. That is evolution by natural selection — a change in the population’s allele frequencies, driven by differences in reproductive success.'},
+      {tag:'HGT', focus:'plasmid', r:9, keys:['plasmid'], act:'arc', title:'Resistance can also jump sideways',
+       body:'Follow the ring: a resistant colony hands a plasmid to a susceptible neighbor by conjugation, and the neighbor turns pink without dividing. Horizontal gene transfer moves resistance between cells — even between species — far faster than inheritance alone.'},
+      {tag:'Classic experiment', focus:'replica', r:14, keys:['replica','resistant'], act:'replica', title:'Resistance before exposure: replica plating',
+       body:'The Lederbergs’ experiment. Stamp the colony pattern onto a plate containing the drug. Only certain positions grow — and on the original dish, which never saw the drug, the colonies at exactly those positions are resistant. Resistance existed before exposure.'},
+      {tag:'Treatment', focus:'antibiotic', r:12, keys:['antibiotic','resistant'], act:'early', title:'Stopping the course early',
+       body:'A fresh dish, then half a course. The most susceptible colonies die first; the hardier survivors — pink included — repopulate the gaps fast, and the dish is now harder to clear than it was. Finishing the course kills the stragglers before they rebound.'},
+      {tag:'Cost', focus:'readout', r:11, keys:['readout','susceptible'], act:'cost', title:'Resistance has a cost',
+       body:'Twelve drug-free generations. The pumps and enzymes that defeat the drug cost energy, so susceptible colonies grow slightly faster and the resistant share drifts down. A mutation harmful in one environment is useful in another: fitness is relative to the environment.'},
+      {tag:'Not a target', focus:'virus', r:8, keys:['virus'], act:'none', title:'Why antibiotics do nothing for a cold',
+       body:'This virus sat outside the dish through every dose, unharmed. It has no wall, no bacterial ribosomes, no metabolism of its own — nothing for an antibiotic to hit. Prescribing antibiotics for viral infections only selects the bacteria the patient already carries.'},
+      {tag:'Takeaway', focus:'dish', r:16, keys:['dish'], act:'none', title:'Why it evolves fast, and what slows it',
+       body:'Short generations, vast numbers, random mutation, and plasmids passing sideways: resistance evolves in days. What slows it is removing the selection pressure where it is not needed — antibiotics only for confirmed bacterial infections, full courses, and less routine use in livestock, where resistant bacteria reach us through food and water.'}
+    ];
+    STOPS.forEach(function(st){ st.enter=function(){ act(st.act); }; });
+    var QUIZ=[
+      {q:'Click a colony that was resistant BEFORE any antibiotic was applied.', keys:['resistant'], enter:function(){ act('reset'); },
+       ok:'A pink colony on a fresh dish — resistant by random mutation, before any drug.', hint:'The pink colonies in the untreated dish.'},
+      {q:'Click the antibiotic.', keys:['antibiotic'], enter:function(){ act('reset'); },
+       ok:'The disc the drug diffuses from. It selects; it does not create.', hint:'The white disc at the center of the dish.'},
+      {q:'Click a colony the drug can kill.', keys:['susceptible'], enter:function(){ act('reset'); },
+       ok:'A susceptible colony — the kind a full course removes.', hint:'Any cream-colored colony.'},
+      {q:'Click the plasmid carrying resistance from one colony to another.', keys:['plasmid'], enter:function(){ act('reset'); act('arcHold'); },
+       ok:'Horizontal gene transfer by conjugation — resistance without a division.', hint:'The small ring arcing between two colonies.'},
+      {q:'Click the readout that tracks the share of resistant colonies across generations.', keys:['readout'], enter:function(){ act('none'); },
+       ok:'The bar strip: one bar per generation, height = % resistant.', hint:'The row of bars behind the dish.'},
+      {q:'Click the replica plate — the experiment that shows resistance arises WITHOUT exposure to the drug.', keys:['replica'], enter:function(){ act('replica'); },
+       ok:'Replica plating: the resistant positions match colonies that never met the drug.', hint:'The smaller plate to the right of the dish.'},
+      {q:'The course was stopped early. Click a colony that survived the partial dose and will repopulate the dish.', keys:['resistant','susceptible'], enter:function(){ act('earlyHold'); },
+       ok:'A survivor — the hardier remainder that regrows, which is why an unfinished course breeds a tougher infection.', hint:'Any colony still standing after the partial dose.'},
+      {q:'Click the organism that an antibiotic cannot harm.', keys:['virus'], enter:function(){ act('none'); },
+       ok:'The virus: no wall, no bacterial ribosome, no metabolism — no target.', hint:'The small particle outside the dish on the left.'},
+      {q:'Click the environment that decides which variants survive once the drug is added.', keys:['agar'], enter:function(){ act('reset'); },
+       ok:'The agar. Fitness is relative to the environment.', hint:'The medium filling the dish.'},
+      {q:'Predict, then click: after twelve drug-free generations the resistant share has FALLEN. Click the colony type that out-grew the other.', keys:['susceptible'], enter:function(){ act('cost'); },
+       ok:'Susceptible colonies — resistance costs energy, so without the drug they win.', hint:'Think about which colonies pay for pumps and enzymes they are not using.'}
+    ];
+    var K=teachKit(self, {id:'selection', radius:16, group:g, labels:true, stops:STOPS, quiz:QUIZ, onTourEnd:function(){ act('reset'); }});
+    var reg=K.register;
+
+    /* ---------- dish, agar, antibiotic disc, pulse ---------- */
+    var dish=new THREE.Group(); g.add(dish);
+    var rim=new THREE.Mesh(new THREE.TorusGeometry(5.5,0.14,10,48), mat(0xD9D2E6)); rim.rotation.x=Math.PI/2; rim.position.y=0.25; dish.add(rim);
+    var base=new THREE.Mesh(new THREE.CylinderGeometry(5.5,5.5,0.12,48), mat(0xD9D2E6,{opacity:0.5})); base.position.y=-0.1; dish.add(base);
+    var wallC=new THREE.Mesh(new THREE.CylinderGeometry(5.5,5.5,0.5,48,1,true), mat(0xD9D2E6,{opacity:0.25,side:THREE.DoubleSide})); wallC.position.y=0.15; dish.add(wallC);
+    reg('dish', dish, INFO.dish, true);
+    var agar=new THREE.Mesh(new THREE.CylinderGeometry(5.3,5.3,0.3,48), mat(0xF2E6C4,{opacity:0.9})); agar.position.y=0.02; g.add(agar);
+    reg('agar', agar, INFO.agar);
+    var disc=new THREE.Mesh(new THREE.CylinderGeometry(0.55,0.55,0.08,20), mat(0xFFFFFF)); disc.position.y=0.22; g.add(disc);
+    reg('antibiotic', disc, INFO.antibiotic);
+    var pulse=new THREE.Mesh(new THREE.CylinderGeometry(1,1,0.04,40), mat(0xE0417B,{opacity:0.35})); pulse.position.y=0.3; pulse.visible=false; g.add(pulse);
+
+    /* ---------- colonies ---------- */
+    var slots=[];
+    function colonyMesh(){
+      var grp=new THREE.Group(), m=mat(SUS,{rough:0.8});
+      [[0,0,0,0.3],[0.22,0.05,0.12,0.22],[-0.18,0.03,-0.16,0.2]].forEach(function(p){ var b=new THREE.Mesh(new THREE.SphereGeometry(p[3],7,6), m); b.position.set(p[0],p[1],p[2]); grp.add(b); });
+      grp.userData.mat=m; return grp;
+    }
+    for(var i=0;i<N;i++){
+      var r=4.3*Math.sqrt((i+0.5)/N), a=i*2.399;
+      var s={x:r*Math.cos(a), z:r*Math.sin(a), alive:true, res:false, size:1, dying:0, flash:-9, mesh:colonyMesh()};
+      s.mesh.position.set(s.x,0.2,s.z); g.add(s.mesh); slots.push(s);
+    }
+    function setRes(s, res){
+      s.res=res; var key=res?'resistant':'susceptible', other=res?'susceptible':'resistant';
+      s.mesh.userData.info=INFO[key]; INFO[key].key=key;
+      var lo=K.reg[other]||[], li=lo.indexOf(s.mesh); if(li>=0) lo.splice(li,1);
+      (K.reg[key]=K.reg[key]||[]); if(K.reg[key].indexOf(s.mesh)<0) K.reg[key].push(s.mesh);
+      s.mesh.userData.mat.color.setHex(res?RES:SUS);
+    }
+    slots.forEach(function(s){ reg('susceptible', s.mesh, INFO.susceptible); });
+    function resetDish(){
+      slots.forEach(function(s,i){ s.alive=true; s.size=0.6+((i*7)%5)*0.1; s.dying=0; s.flash=-9; setRes(s, i===4||i===13||i===22); });
+      self._gen=0; self._history=[]; self._lastGen=self._K.animT; self._arc=null; self._pulse=null; self._mut=0.02;
+      updateReadout();
+    }
+    function alive(){ return slots.filter(function(s){ return s.alive; }); }
+    function resPct(){ var al=alive(); if(!al.length) return 0; return Math.round(100*al.filter(function(s){ return s.res; }).length/al.length); }
+    function kill(s){ if(s.alive){ s.alive=false; s.dying=1; } }
+    function pickParent(s){
+      var cands=slots.filter(function(o){ return o.alive && o!==s && Math.hypot(o.x-s.x,o.z-s.z)<2.6; });
+      if(!cands.length) cands=alive(); if(!cands.length) return null;
+      var tot=0; cands.forEach(function(o){ tot+=o.size*(o.res?0.85:1); });
+      var pick=Math.random()*tot; for(var i=0;i<cands.length;i++){ pick-=cands[i].size*(cands[i].res?0.85:1); if(pick<=0) return cands[i]; }
+      return cands[cands.length-1];
+    }
+    function stepGeneration(){
+      self._gen++;
+      slots.forEach(function(s){ if(s.alive) s.size=Math.min(1, s.size+0.35*(s.res?0.85:1)); });
+      slots.forEach(function(s){ if(s.alive && Math.random()<0.07) kill(s); });
+      slots.forEach(function(s){ if(s.alive && !s.res && Math.random()<self._mut){ setRes(s,true); s.flash=self._K.animT; } });
+      slots.forEach(function(s){
+        if(!s.alive && s.dying<=0 && Math.random()<0.65){
+          var p=pickParent(s); if(!p) return;
+          s.alive=true; s.size=0.15; setRes(s, p.res || Math.random()<self._mut);
+        }
+      });
+      self._history.push(resPct()); if(self._history.length>24) self._history.shift();
+      updateReadout();
+    }
+    function applyDrug(full){
+      self._pulse=self._K.animT;
+      slots.forEach(function(s){ if(s.alive && !s.res && (full || Math.random()<0.6)) kill(s); });
+      self._history.push(resPct()); if(self._history.length>24) self._history.shift(); updateReadout();
+    }
+    function startArc(hold){
+      var from=null, to=null, best=99;
+      alive().filter(function(s){ return s.res; }).forEach(function(rs){
+        alive().filter(function(s){ return !s.res; }).forEach(function(ss){ var d=Math.hypot(rs.x-ss.x, rs.z-ss.z); if(d<best){ best=d; from=rs; to=ss; } });
+      });
+      if(!from){ return; }
+      self._arc={from:from, to:to, start:self._K.animT-(hold?0.8:0), done:false};
+    }
+
+    /* ---------- readout: bar strip + live label ---------- */
+    var readout=new THREE.Group(); readout.position.set(0,0,-7.2); g.add(readout);
+    var bars=[];
+    for(var b=0;b<24;b++){ var bar=new THREE.Mesh(new THREE.BoxGeometry(0.22,1,0.22), mat(RES)); bar.position.set((b-11.5)*0.34,0,0); bar.scale.y=0.02; readout.add(bar); bars.push(bar); }
+    var rail=new THREE.Mesh(new THREE.BoxGeometry(8.4,0.06,0.4), mat(0x8A82A0)); readout.add(rail);
+    reg('readout', readout, INFO.readout);
+    var readoutLabel=K.label(rail, 'Gen 0 · 10% resistant', 2.6);
+    function updateReadout(){
+      var h=self._history;
+      bars.forEach(function(bar,i){ var v=h[h.length-24+i]; var hh=(v===undefined)?0.02:Math.max(0.02,v/100*2.2); bar.scale.y=hh; bar.position.y=hh/2; });
+      K.relabel(readoutLabel, 'Gen '+self._gen+' · '+resPct()+'% resistant · '+alive().length+' colonies');
+    }
+
+    /* ---------- replica plate, plasmid ring, virus ---------- */
+    var replica=new THREE.Group(); replica.position.set(9.6,0,0); replica.scale.setScalar(0.6); replica.visible=false; g.add(replica);
+    var rrim=rim.clone(); replica.add(rrim); var rbase=base.clone(); replica.add(rbase);
+    var ragar=new THREE.Mesh(new THREE.CylinderGeometry(5.3,5.3,0.3,48), mat(0xF2CFCF,{opacity:0.9})); ragar.position.y=0.02; replica.add(ragar);
+    var rcols=[]; slots.forEach(function(s){ var c=ball(0.32,RES,8); c.position.set(s.x,0.3,s.z); replica.add(c); rcols.push(c); });
+    reg('replica', replica, INFO.replica);
+    var velvet=new THREE.Mesh(new THREE.CylinderGeometry(5.3,5.3,0.25,40), mat(0x6B4BA8,{opacity:0.5})); velvet.visible=false; g.add(velvet);
+    var plasmid=new THREE.Mesh(new THREE.TorusGeometry(0.3,0.08,8,20), mat(0xF0A73A)); plasmid.visible=false; g.add(plasmid);
+    reg('plasmid', plasmid, INFO.plasmid);
+    var virus=new THREE.Group(); virus.position.set(-8,1.2,2.5);
+    var vh=ball(0.4,0x9B5FE0,12); vh.position.y=0.8; virus.add(vh); var vt=rod(0.08,0.6,0xB98BFF); vt.position.y=0.25; virus.add(vt);
+    for(var lg=0;lg<6;lg++){ var la=lg/6*Math.PI*2, leg=rod(0.03,0.45,0xB98BFF); leg.position.set(Math.cos(la)*0.18,-0.15,Math.sin(la)*0.18); leg.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), new THREE.Vector3(Math.cos(la)*0.55,-1,Math.sin(la)*0.55).normalize()); virus.add(leg); }
+    g.add(virus); reg('virus', virus, INFO.virus);
+
+    /* labels pinned to live anchors (the first resistant / susceptible colony moves around) */
+    var anchorR=new THREE.Object3D(), anchorS=new THREE.Object3D(); g.add(anchorR, anchorS);
+    K.label(anchorR,'Resistant',0.9); K.label(anchorS,'Susceptible',0.9); K.label(disc,'Antibiotic',0.9); K.label(replica,'Replica plate',3.6);
+    K.label(virus,'Virus — no target',1.6); K.label(agar,'Agar',-0.9);
+
+    /* ---------- actions used by Tour, Quiz and buttons ---------- */
+    function act(name){
+      if(name==='reset'){ self._mode='dish'; replica.visible=false; resetDish(); }
+      else if(name==='highMut'){ self._mode='dish'; self._mut=0.12; }
+      else if(name==='full'){ self._mode='dish'; resetDish(); applyDrug(true); }
+      else if(name==='run6'){ self._mode='dish'; resetDish(); applyDrug(true); for(var i=0;i<6;i++) stepGeneration(); }
+      else if(name==='arc'){ self._mode='dish'; startArc(false); }
+      else if(name==='arcHold'){ startArc(true); }
+      else if(name==='replica'){ self._mode='replica'; replica.visible=true; rcols.forEach(function(c,i){ var s=slots[i]; c.visible=s.alive; c.material.color.setHex(s.res?RES:0xD9D2E6); c.scale.setScalar(s.res?1:0.35); }); }
+      else if(name==='early'){ self._mode='dish'; resetDish(); applyDrug(false); }
+      else if(name==='earlyHold'){ self._mode='dish'; resetDish(); applyDrug(false); for(var j=0;j<2;j++) stepGeneration(); }
+      else if(name==='cost'){ self._mode='dish'; resetDish(); applyDrug(true); for(var k=0;k<4;k++) stepGeneration(); for(var k2=0;k2<12;k2++) stepGeneration(); }
+      if(name!=='highMut' && name!=='none' && name!=='arcHold') self._mut=0.02;
+    }
+    var drugBtn=K.button('selectionDrug','btn','Apply antibiotic'); drugBtn.onclick=function(){ applyDrug(true); };
+    var earlyBtn=K.button('selectionEarly','btn ghost','Stop course early'); earlyBtn.onclick=function(){ applyDrug(false); };
+    var resetBtn=K.button('selectionReset','btn ghost','Reset dish'); resetBtn.onclick=function(){ act('reset'); };
+    resetDish();
+
+    self._parts={slots:slots, pulse:pulse, plasmid:plasmid, anchorR:anchorR, anchorS:anchorS, replica:replica, stepGeneration:stepGeneration, setRes:setRes, GEN:GEN, SUS:SUS, RES:RES};
+  },
+  onPick:function(info){ return this._K.onPick(info); },
+  onReset:function(){ this._K.onReset(); },
+
+  tick:function(t){
+    var self=this, P=self._parts; if(!P) return;
+    var f=self._K.tick(t), at=f.at, dt=f.dt;
+    function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+
+    /* generations tick on the animation clock (frozen during a quiz) */
+    if(at-self._lastGen>P.GEN){ P.stepGeneration(); self._lastGen=at; }
+    /* a plasmid crosses to a neighbor now and then on its own */
+    if(!self._arc && Math.random()<dt*0.08){ var any=P.slots.some(function(s){ return s.alive&&s.res; }); if(any) self._startArcAuto=true; }
+
+    var firstR=null, firstS=null;
+    P.slots.forEach(function(s){
+      if(s.dying>0){ s.dying=Math.max(0, s.dying-dt*1.4); s.mesh.scale.setScalar(Math.max(0.01, s.size*s.dying)); if(s.dying<=0) s.mesh.visible=false; return; }
+      if(!s.alive){ s.mesh.visible=false; return; }
+      s.mesh.visible=true;
+      var sc=s.size*(1+0.04*Math.sin(at*2+s.x)); s.mesh.scale.setScalar(sc);
+      var fl=clamp(1-(at-s.flash)/0.8,0,1); s.mesh.userData.mat.emissive.setHex(0xFFFFFF); s.mesh.userData.mat.emissiveIntensity=fl*0.8;
+      if(s.res && !firstR) firstR=s; if(!s.res && !firstS) firstS=s;
+    });
+    if(firstR){ P.anchorR.visible=true; P.anchorR.position.set(firstR.x,0.2,firstR.z); } else P.anchorR.visible=false;
+    if(firstS){ P.anchorS.visible=true; P.anchorS.position.set(firstS.x,0.2,firstS.z); } else P.anchorS.visible=false;
+
+    /* antibiotic pulse ring expanding from the disc */
+    if(self._pulse!==null){
+      var u=(at-self._pulse)/1.2;
+      if(u>=1){ self._pulse=null; P.pulse.visible=false; }
+      else { P.pulse.visible=true; var rr=0.6+4.9*u; P.pulse.scale.set(rr,1,rr); P.pulse.material.opacity=0.4*(1-u); }
+    } else P.pulse.visible=false;
+
+    /* plasmid arc */
+    if(self._startArcAuto){ self._startArcAuto=false; var from=null,to=null,best=99;
+      P.slots.forEach(function(rs){ if(!(rs.alive&&rs.res)) return; P.slots.forEach(function(ss){ if(!(ss.alive&&!ss.res)) return; var d=Math.hypot(rs.x-ss.x,rs.z-ss.z); if(d<best){ best=d; from=rs; to=ss; } }); });
+      if(from) self._arc={from:from,to:to,start:at,done:false};
+    }
+    if(self._arc){
+      var A=self._arc, u2=clamp((at-A.start)/1.6,0,1);
+      P.plasmid.visible=true;
+      P.plasmid.position.set(A.from.x+(A.to.x-A.from.x)*u2, 0.5+Math.sin(u2*Math.PI)*1.4, A.from.z+(A.to.z-A.from.z)*u2);
+      P.plasmid.rotation.y=at*3;
+      if(u2>=1 && !A.done){ A.done=true; if(A.to.alive){ P.setRes(A.to,true); A.to.flash=at; } }
+      if(at-A.start>2.4){ self._arc=null; P.plasmid.visible=false; }
+    } else P.plasmid.visible=false;
   }
 });
 
