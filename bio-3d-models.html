@@ -1487,366 +1487,611 @@ MODELS.push({
 
 /* ============================================================
    MODEL 4 — Enzyme & Inhibitor (Level 7)
-   Two-lobed enzyme (beta-lactamase) whose cleft IS the active site —
-   no boolean geometry needed. A Step button cycles the ligand shown
-   (substrate / competitive inhibitor / noncompetitive inhibitor); a
-   temperature slider denatures the enzyme past its optimum.
+   Two bacterial enzymes, each a pair of lathe lobes whose cleft is
+   the active site. Left: transpeptidase, which cross-links the
+   peptidoglycan wall — penicillin's target. Right: beta-lactamase,
+   which destroys penicillin — the resistance enzyme. Above: an
+   activation-energy diagram with a reactant rolling over the hill.
+   Below: a rate gauge driven by the temperature slider, which also
+   denatures both enzymes. Modes (set by Tour/Quiz): normal,
+   penicillin (competitive), noncomp (allosteric), resistance.
    ============================================================ */
 MODELS.push({
   id:'enzyme',
   name:'4 · Enzyme & Inhibitor',
   level:'Level 7 · 3.2.9-12.E',
-  hint:'Click the enzyme or a ligand · Step (top-right) switches substrate/inhibitor · drag the slider past ~42°C to denature it',
-  radius:11,
+  hint:'Click anything to focus on it · Tour walks you through · drag the slider past ~42°C to denature the enzymes',
+  radius:18,
   build:function(ctx){
     var g=ctx.group, self=this;
-    if(self._step===undefined) self._step=0;
-    if(self._temp===undefined) self._temp=37;
+    self._temp=37; self._mode='normal'; self._modeStart=null;
+    var TP=new THREE.Vector3(-5,0,0), BL=new THREE.Vector3(5.5,0,0);
 
-    function pick(container, info){
-      container.userData.info=info;
-      if(container.isMesh) PICKABLE.push(container);
-      container.traverse(function(o){ if(o!==container && o.isMesh) PICKABLE.push(o); });
-    }
-
-    /* ---------- enzyme: two lobes, the gap between them is the active-site cleft ---------- */
-    var profile=[
-      new THREE.Vector2(0.00,-1.00), new THREE.Vector2(0.50,-0.90), new THREE.Vector2(0.85,-0.50),
-      new THREE.Vector2(0.95, 0.00), new THREE.Vector2(0.80, 0.50), new THREE.Vector2(0.45, 0.85),
-      new THREE.Vector2(0.00, 1.00)
-    ];
-    var lobeGeo=new THREE.LatheGeometry(profile,24);
-    var healthyColor=new THREE.Color(0xB8935C), denaturedColor=new THREE.Color(0x8A8272);
-    var lobeMat=mat(0xB8935C, {rough:0.6});
-    var lobeA=new THREE.Mesh(lobeGeo,lobeMat); lobeA.position.x=-1.05;
-    var lobeB=new THREE.Mesh(lobeGeo,lobeMat); lobeB.position.x=1.05;
-    var enzymeGroup=new THREE.Group(); enzymeGroup.add(lobeA,lobeB); g.add(enzymeGroup);
-    pick(enzymeGroup, {tag:'Enzyme', title:'Beta-lactamase',
-      body:'A bacterial enzyme whose two lobes form a cleft shaped to fit the four-membered beta-lactam ring found in penicillin and related antibiotics. Catalysis depends entirely on that shape — heat the enzyme past its optimum and the cleft loses its shape completely, which is exactly what ‘denatured’ means.'});
-
-    /* ---------- substrate: penicillin (beta-lactam ring + thiazolidine ring + tail) ---------- */
-    var subInfo={tag:'Substrate', title:'Penicillin',
-      body:'The four-membered beta-lactam ring (highlighted) is the reactive part of every penicillin-class antibiotic — it strains a bond that a bacterial cell-wall-building enzyme needs intact. Beta-lactamase recognizes that same ring, but instead of being blocked by it, hydrolyzes it open, destroying the drug before it can act.'};
-    var ringA=new THREE.Mesh(new THREE.TorusGeometry(0.22,0.05,8,16), mat(0xE0417B));
-    var bodyGrp=new THREE.Group();
-    var ringB=new THREE.Mesh(new THREE.TorusGeometry(0.28,0.06,8,20), mat(0x8FA8E8)); ringB.position.x=0.42; ringB.rotation.y=0.3;
-    var tail=rod(0.06,0.6,0xF0A73A); tail.rotation.z=Math.PI/2; tail.position.x=0.85;
-    bodyGrp.add(ringB,tail);
-    g.add(ringA,bodyGrp);
-    pick(ringA,subInfo); pick(bodyGrp,subInfo);
-
-    /* ---------- competitive inhibitor: clavulanic acid stand-in ---------- */
-    var compMesh=new THREE.Mesh(new THREE.BoxGeometry(0.55,0.4,0.45), mat(0xCC4444));
-    g.add(compMesh);
-    pick(compMesh, {tag:'Competitive inhibitor', title:'Competitive inhibitor (e.g., clavulanic acid)',
-      body:'Resembles the substrate closely enough to occupy the same active-site cleft, physically outcompeting penicillin for it. Clavulanic acid goes further — it reacts once bound and permanently jams the enzyme, which is why it’s paired with amoxicillin in drugs like Augmentin.'});
-
-    /* ---------- noncompetitive (allosteric) inhibitor ---------- */
-    var nonMesh=new THREE.Mesh(new THREE.TorusKnotGeometry(0.22,0.08,80,10,2,3), mat(0x9B5FE0));
-    g.add(nonMesh);
-    pick(nonMesh, {tag:'Noncompetitive inhibitor', title:'Noncompetitive (allosteric) inhibitor',
-      body:'Binds a site away from the active cleft entirely — but the enzyme is one connected structure, so binding there still pulls the cleft out of shape. It can’t be outcompeted by more substrate, because it was never competing for the same site: the active site itself gets deformed, whether substrate is present or not.'});
-
-    self._enz={
-      lobeA:lobeA, lobeB:lobeB, lobeMat:lobeMat, healthyColor:healthyColor, denaturedColor:denaturedColor,
-      ringA:ringA, bodyGrp:bodyGrp, compMesh:compMesh, nonMesh:nonMesh
+    var INFO={
+      'transpeptidase':{tag:'Enzyme', title:'Transpeptidase (bacterial wall-building enzyme)',
+        body:'A protein catalyst. Its two lobes fold into a cleft shaped to grip the peptide stems of peptidoglycan and cross-link them — the step that makes a bacterial cell wall rigid. It speeds that reaction by lowering its activation energy, and it is used again and again. This is the enzyme penicillin blocks.'},
+      'beta-lactamase':{tag:'Enzyme', title:'Beta-lactamase (resistance enzyme)',
+        body:'A second bacterial enzyme, evolved under antibiotic pressure. Its active site fits penicillin’s beta-lactam ring and hydrolyzes it open, destroying the drug before it reaches transpeptidase. Enzyme specificity cuts both ways: the same principle that lets a drug target one enzyme lets bacteria evolve an enzyme that targets the drug.'},
+      'active-site':{tag:'Enzyme', title:'Active site',
+        body:'The cleft where the substrate binds. Its shape and chemistry complement one substrate and few others — that is enzyme specificity. When the substrate lands, the lobes flex slightly to grip it: induced fit, not a rigid lock and key.'},
+      'substrate':{tag:'Reaction', title:'Substrate (peptidoglycan stems)',
+        body:'The molecule the enzyme acts on: two peptide stems hanging from neighboring sugar chains of the wall. They fit the active site; the enzyme bonds them together and releases the cross-linked product.'},
+      'product':{tag:'Reaction', title:'Product (cross-linked peptidoglycan)',
+        body:'What leaves the active site: the two stems now joined by a cross-link. Stacked up, these cross-links are the mesh that keeps a bacterium from bursting under its own pressure.'},
+      'wall':{tag:'Reaction', title:'Peptidoglycan wall',
+        body:'Sugar chains tied together by the cross-links transpeptidase makes. Human cells have no wall and no transpeptidase — so a drug that stops this enzyme harms the bacterium and not you. That is selective toxicity.'},
+      'wrong-substrate':{tag:'Specificity', title:'Non-matching molecule',
+        body:'The wrong shape and charge for this active site, so it bumps off without binding. Specificity is why lactase acts on lactose and nothing else — and why one drug can target one enzyme.'},
+      'penicillin':{tag:'Competitive inhibitor', title:'Penicillin',
+        body:'Its beta-lactam ring (pink) mimics the substrate’s stems, so it fits the same active site and jams it — a competitive inhibitor. No cross-links get made, the wall weakens, and the bacterium bursts. Flooding the site with more substrate can outcompete it. Sulfa drugs work the same way on a bacterial folate enzyme humans do not have.'},
+      'noncomp':{tag:'Noncompetitive inhibitor', title:'Noncompetitive (allosteric) inhibitor',
+        body:'Binds a site away from the active cleft entirely — but the enzyme is one connected structure, so binding there pulls the cleft out of shape. More substrate cannot outcompete it, because it was never competing for the same site.'},
+      'fragments':{tag:'Resistance', title:'Hydrolyzed penicillin',
+        body:'Penicillin with its beta-lactam ring cut open by beta-lactamase — now harmless to transpeptidase. The drug was destroyed before it could act: an enzyme-based resistance mechanism.'},
+      'ea-uncat':{tag:'Activation energy', title:'Without the enzyme',
+        body:'The energy hill a reaction must climb before it can run. Uncatalyzed it is tall, so at body temperature almost no substrate molecules make it over — watch the reactant roll back.'},
+      'ea-cat':{tag:'Activation energy', title:'With the enzyme',
+        body:'The same reaction, same reactant, same product — but the enzyme lowers the hill, so molecules make it over constantly. Enzymes do not change what is made or supply energy; they lower the activation energy.'},
+      'reactant':{tag:'Activation energy', title:'Reactant on the hill',
+        body:'A molecule climbing the activation-energy barrier. Over the top it becomes product and the energy released shows as the drop on the far side.'},
+      'rate':{tag:'Reaction rate', title:'Rate gauge',
+        body:'How fast the reaction runs at the slider’s temperature. Rate rises with heat as molecules collide harder and more often — until the enzyme passes its optimum and denatures, when the rate collapses. Every enzyme also has an optimal pH, for the same reason: the fold depends on it.'}
     };
 
-    /* ---------- Step button (which ligand) ---------- */
-    var LABELS=['Substrate: penicillin ▶','Competitive inhibitor ▶','Noncompetitive inhibitor ▶'];
-    var btn=document.getElementById('enzStep');
-    if(!btn){
-      btn=document.createElement('button');
-      btn.id='enzStep'; btn.className='btn';
-      document.getElementById('bar').insertBefore(btn, document.getElementById('lvl'));
-      btn.onclick=function(){ self._step=(self._step+1)%3; btn.textContent=LABELS[self._step]; };
+    var STOPS=[
+      {tag:'Overview', focus:null, r:18, keys:['transpeptidase','beta-lactamase'], mode:['normal',0], temp:37, title:'Enzymes: protein catalysts',
+       body:'Two bacterial enzymes. Left, transpeptidase, which builds the cell wall by cross-linking peptidoglycan — the enzyme penicillin blocks. Right, beta-lactamase, which some bacteria evolved to destroy penicillin. Above them, why enzymes work at all: the activation-energy hill. Below, a gauge of reaction rate.'},
+      {tag:'Activation energy', focus:'ea-cat', r:8, keys:['ea-cat','ea-uncat','reactant'], mode:['normal',0], temp:37, title:'Lowering the activation energy',
+       body:'Every reaction must climb an energy hill before it can run. The tall grey hill is the reaction on its own — the reactant rolls back; almost nothing gets over. The low pink hill is the same reaction with the enzyme. Same reactant, same product, less energy to get started: that is all a catalyst does.'},
+      {tag:'Reaction', focus:'substrate', r:9, keys:['substrate','active-site','product'], mode:['normal',0.4], temp:37, title:'Substrate in, product out',
+       body:'The substrate — two peptide stems from the wall — drops into the active-site cleft. The enzyme bonds them together and releases the product, a cross-link, which drifts off to the wall. The enzyme is unchanged and ready for the next pair, over and over.'},
+      {tag:'Specificity', focus:'active-site', r:7, keys:['active-site'], mode:['normal',1.4], temp:37, title:'Induced fit',
+       body:'Watch the lobes as the substrate lands: they close slightly around it. The active site is not a rigid lock — it adjusts its shape to grip the substrate. That flexing, induced fit, is what strains the substrate’s bonds and makes the reaction go.'},
+      {tag:'Specificity', focus:'wrong-substrate', r:9, keys:['wrong-substrate','active-site'], mode:['normal',0], temp:37, title:'Why enzymes are specific',
+       body:'The blue block keeps arriving and bouncing off. Its shape and charge do not complement the cleft, so it never binds. An active site fits one substrate, or a few close relatives — lactase acts on lactose and nothing else.'},
+      {tag:'Rate', focus:'rate', r:9, keys:['rate'], mode:['normal',0], temp:37, title:'Temperature and reaction rate',
+       body:'The gauge shows how fast the reaction runs at the slider’s temperature. Warm the enzyme and the rate climbs — molecules move faster and collide more — up to an optimum near 37°C for a human pathogen. Each enzyme also has an optimal pH. Try the slider: the animation speeds up and slows down with the rate.'},
+      {tag:'Denaturation', focus:'transpeptidase', r:10, keys:['transpeptidase','beta-lactamase'], mode:['normal',0], temp:72, title:'Past the optimum: denaturation',
+       body:'At 72°C the weak bonds holding the fold give way. The lobes pull apart, the cleft loses its shape, and the substrate no longer fits — the rate drops to nothing. The amino acid sequence is intact; only the three-dimensional shape is gone, usually for good. Drag the slider back down to see the shape, not the sequence, is what matters.'},
+      {tag:'Competitive inhibitor', focus:'penicillin', r:9, keys:['penicillin','active-site'], mode:['penicillin',0], temp:37, title:'Penicillin: a competitive inhibitor',
+       body:'Penicillin’s beta-lactam ring resembles the substrate’s stems, so it fits the same active site — and sticks. With the cleft occupied, substrate bounces off and no cross-links get made. The wall weakens and the bacterium bursts. Add enough substrate and it can outcompete the inhibitor; sulfa drugs block a bacterial enzyme the same way.'},
+      {tag:'Selective toxicity', focus:'wall', r:9, keys:['wall','transpeptidase'], mode:['penicillin',3], temp:37, title:'Harms bacteria, not you',
+       body:'Penicillin is lethal to a bacterium yet harmless to your cells for one reason: your cells have no peptidoglycan wall and no transpeptidase to inhibit. A drug aimed at a structure the pathogen has and the host does not — that is selective toxicity, the principle behind most antibiotics.'},
+      {tag:'Noncompetitive inhibitor', focus:'noncomp', r:9, keys:['noncomp','active-site'], mode:['noncomp',0], temp:37, title:'Inhibition from a distance',
+       body:'This inhibitor binds the back of the enzyme, nowhere near the cleft — yet the cleft deforms, because the protein is one connected fold. Substrate cannot outcompete it; it was never competing for the same site. Noncompetitive, or allosteric, inhibition.'},
+      {tag:'Resistance', focus:'beta-lactamase', r:9, keys:['beta-lactamase','fragments'], mode:['resistance',0.4], temp:37, title:'Resistance: an enzyme that destroys the drug',
+       body:'Some bacteria make beta-lactamase, whose active site fits penicillin’s ring and hydrolyzes it open. The drug is destroyed before it reaches transpeptidase, which keeps building wall on the left. Specificity cuts both ways — which is why clavulanic acid, a beta-lactamase inhibitor, is paired with amoxicillin.'}
+    ];
+    STOPS.forEach(function(st){ st.enter=function(){ setMode(st.mode[0], st.mode[1]); setTemp(st.temp); }; });
+    var QUIZ=[
+      {q:'Click the energy hill as it is WITH the enzyme — the lowered activation energy.', keys:['ea-cat'], enter:function(){ setMode('normal',0); setTemp(37); },
+       ok:'The low hill: the enzyme lowers the activation energy without changing reactant or product.', hint:'The pink curve in the diagram at the top.'},
+      {q:'Click the substrate — the molecule the enzyme acts on.', keys:['substrate'], enter:function(){ setMode('normal',0.5); setTemp(37); },
+       ok:'The two peptide stems about to enter the cleft.', hint:'The small grey-and-amber piece approaching the left enzyme from above.'},
+      {q:'Click the product of the reaction — what the enzyme releases.', keys:['product','wall'], enter:function(){ setMode('normal',3.6); setTemp(37); },
+       ok:'Cross-linked peptidoglycan: the stems joined by a bridge, stacking up as wall.', hint:'The piece drifting away from the left enzyme, or the lattice of wall on the far left.'},
+      {q:'Click an active site.', keys:['active-site'], enter:function(){ setMode('normal',0); setTemp(37); },
+       ok:'The cleft between the lobes, shaped to fit one substrate.', hint:'The translucent pocket between the two lobes of either enzyme.'},
+      {q:'Click the molecule that cannot bind because its shape does not match the active site.', keys:['wrong-substrate'], enter:function(){ setMode('normal',0); setTemp(37); },
+       ok:'The blue block — wrong shape, wrong charge, no binding. That is specificity.', hint:'The cube that keeps bumping off the left enzyme.'},
+      {q:'Click the competitive inhibitor — the drug that jams the active site by resembling the substrate.', keys:['penicillin'], enter:function(){ setMode('penicillin',3); setTemp(37); },
+       ok:'Penicillin, lodged in transpeptidase’s active site.', hint:'The ringed molecule sitting in the cleft of the left enzyme.'},
+      {q:'Click the enzyme that penicillin blocks — the one that cross-links the bacterial wall.', keys:['transpeptidase'], enter:function(){ setMode('penicillin',3); setTemp(37); },
+       ok:'Transpeptidase. Your cells have no wall and no such enzyme — selective toxicity.', hint:'The tan two-lobed enzyme on the left.'},
+      {q:'Click the enzyme that DESTROYS penicillin — the resistance mechanism.', keys:['beta-lactamase'], enter:function(){ setMode('resistance',2); setTemp(37); },
+       ok:'Beta-lactamase, hydrolyzing the drug’s ring before it can act.', hint:'The violet two-lobed enzyme on the right.'},
+      {q:'Click penicillin AFTER beta-lactamase has destroyed it.', keys:['fragments'], enter:function(){ setMode('resistance',3.3); setTemp(37); },
+       ok:'Hydrolyzed penicillin: ring cut open, harmless now. Enzyme-based resistance.', hint:'The two pieces drifting apart from the violet enzyme on the right.'},
+      {q:'Click an enzyme that has been denatured by heat.', keys:['transpeptidase','beta-lactamase'], enter:function(){ setMode('normal',0); setTemp(72); },
+       ok:'Unfolded: the lobes have pulled apart and the cleft has lost its shape. Sequence intact, function gone.', hint:'Either enzyme — both have lost their shape at this temperature.'},
+      {q:'Click the inhibitor that binds AWAY from the active site and deforms it.', keys:['noncomp'], enter:function(){ setMode('noncomp',3); setTemp(37); },
+       ok:'A noncompetitive inhibitor on the back of the enzyme.', hint:'The purple knot attached to the far side of the left enzyme.'},
+      {q:'Click the gauge that shows the reaction rate.', keys:['rate'], enter:function(){ setMode('normal',0); setTemp(37); },
+       ok:'The rate gauge — it rises with temperature until the enzyme denatures.', hint:'The bar at the bottom of the scene.'},
+      {q:'Click the structure human cells lack — the reason penicillin spares you.', keys:['wall'], enter:function(){ setMode('normal',0); setTemp(37); },
+       ok:'The peptidoglycan wall. No wall, no transpeptidase, nothing for penicillin to hit.', hint:'The lattice of chains and cross-links on the far left.'}
+    ];
+    var K=teachKit(self, {id:'enzyme', radius:18, stops:STOPS, quiz:QUIZ, onTourEnd:function(){ setMode('normal',0); setTemp(37); }});
+    var reg=K.register;
+    function setMode(m, off){ self._mode=m; self._modeStart=(self._K?self._K.animT:0)-(off||0); }
+
+    /* ---------- two enzymes ---------- */
+    var profile=[new THREE.Vector2(0,-1), new THREE.Vector2(0.5,-0.9), new THREE.Vector2(0.85,-0.5), new THREE.Vector2(0.95,0),
+                 new THREE.Vector2(0.8,0.5), new THREE.Vector2(0.45,0.85), new THREE.Vector2(0,1)];
+    var lobeGeo=new THREE.LatheGeometry(profile,24);
+    function enzyme(pos, hex, key, info){
+      var m=mat(hex,{rough:0.6}), grp=new THREE.Group(); grp.position.copy(pos);
+      var A=new THREE.Mesh(lobeGeo,m), B=new THREE.Mesh(lobeGeo,m); A.position.x=-1.3; B.position.x=1.3; grp.add(A,B);
+      g.add(grp); reg(key, grp, info);
+      var site=ball(0.32,0xEFE9F7,16,{opacity:0.22}); site.position.copy(pos); g.add(site); reg('active-site', site, INFO['active-site'], true);
+      return {grp:grp, A:A, B:B, mat:m, site:site, healthy:new THREE.Color(hex), dull:new THREE.Color(0x8A8272)};
     }
-    btn.setAttribute('data-model-ui','enzyme');
-    btn.textContent=LABELS[self._step];
+    var tp=enzyme(TP, 0xB8935C, 'transpeptidase', INFO.transpeptidase);
+    var bl=enzyme(BL, 0x9B8AC4, 'beta-lactamase', INFO['beta-lactamase']);
+
+    /* ---------- substrate / product / wrong substrate ---------- */
+    function stems(withBridge){
+      var grp=new THREE.Group();
+      [-0.45,0.45].forEach(function(x){
+        var chain=rod(0.07,0.9,0x8A82A0); chain.position.x=x; grp.add(chain);
+        var stem=rod(0.06,0.34,0xF0A73A); stem.rotation.z=Math.PI/2; stem.position.x=x*0.6; grp.add(stem);
+      });
+      if(withBridge){ var br=rod(0.075,0.32,0xE0417B); br.rotation.z=Math.PI/2; grp.add(br); }
+      return grp;
+    }
+    var substrate=stems(false); substrate.scale.setScalar(0.75); g.add(substrate); reg('substrate', substrate, INFO.substrate);
+    var product=stems(true); product.visible=false; g.add(product); reg('product', product, INFO.product);
+    var wrong=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.5,0.5), mat(0x8FA8E8)); g.add(wrong); reg('wrong-substrate', wrong, INFO['wrong-substrate']);
+
+    /* the wall the product builds: three sugar chains tied by cross-links */
+    var wall=new THREE.Group(); wall.position.set(-11,0,-0.5);
+    [-0.9,0,0.9].forEach(function(x){ var ch=rod(0.08,6,0x8A82A0); ch.position.x=x; wall.add(ch); });
+    for(var wy=-2; wy<=2; wy+=1){ [-0.45,0.45].forEach(function(x){ var cl=rod(0.06,0.9,0xF0A73A); cl.rotation.z=Math.PI/2; cl.position.set(x,wy,0); wall.add(cl); }); }
+    g.add(wall); reg('wall', wall, INFO.wall);
+
+    /* ---------- penicillin: one for transpeptidase, a splittable one for beta-lactamase ---------- */
+    function penicillin(){
+      var grp=new THREE.Group();
+      var ring=new THREE.Mesh(new THREE.TorusGeometry(0.22,0.05,8,16), mat(0xE0417B)); grp.add(ring);
+      var ringB=new THREE.Mesh(new THREE.TorusGeometry(0.28,0.06,8,20), mat(0x8FA8E8)); ringB.position.x=0.42; ringB.rotation.y=0.3; grp.add(ringB);
+      var tail=rod(0.06,0.6,0xF0A73A); tail.rotation.z=Math.PI/2; tail.position.x=0.85; grp.add(tail);
+      return grp;
+    }
+    var penTP=penicillin(); penTP.visible=false; g.add(penTP); reg('penicillin', penTP, INFO.penicillin);
+    var penRing=new THREE.Mesh(new THREE.TorusGeometry(0.22,0.05,8,16), mat(0xE0417B)); penRing.visible=false; g.add(penRing);
+    var penBody=new THREE.Group();
+    var pb2=new THREE.Mesh(new THREE.TorusGeometry(0.28,0.06,8,20), mat(0x8FA8E8)); pb2.position.x=0.42; pb2.rotation.y=0.3; penBody.add(pb2);
+    var pt2=rod(0.06,0.6,0xF0A73A); pt2.rotation.z=Math.PI/2; pt2.position.x=0.85; penBody.add(pt2);
+    penBody.visible=false; g.add(penBody);
+    reg('fragments', penRing, INFO.fragments); reg('fragments', penBody, INFO.fragments);
+
+    var noncomp=new THREE.Mesh(new THREE.TorusKnotGeometry(0.22,0.08,80,10,2,3), mat(0x9B5FE0)); noncomp.visible=false; g.add(noncomp);
+    reg('noncomp', noncomp, INFO.noncomp);
+
+    /* ---------- activation-energy diagram ---------- */
+    var ea=new THREE.Group(); ea.position.set(0.5,5.2,-3); g.add(ea);
+    var axX=rod(0.03,6.6,0x5E5678); axX.rotation.z=Math.PI/2; axX.position.set(0,-0.9,0); ea.add(axX);
+    var axY=rod(0.03,3.8,0x5E5678); axY.position.set(-3.3,1.0,0); ea.add(axY);
+    function hillPts(h){ var pts=[]; for(var i=0;i<=60;i++){ var x=-3+6*i/60; pts.push(new THREE.Vector3(x, -0.6*(x+3)/6 + h*Math.exp(-(x*x)/1.0), 0)); } return pts; }
+    var unPts=hillPts(2.4), caPts=hillPts(0.9);
+    var hillU=new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(unPts),80,0.06,8,false), mat(0x8A82A0)); ea.add(hillU); reg('ea-uncat', hillU, INFO['ea-uncat']);
+    var hillC=new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(caPts),80,0.07,8,false), mat(0xE0417B)); ea.add(hillC); reg('ea-cat', hillC, INFO['ea-cat']);
+    var ballC=ball(0.17,0xF0A73A,12), ballU=ball(0.17,0x8FA8E8,12); ea.add(ballC, ballU);
+    reg('reactant', ballC, INFO.reactant); reg('reactant', ballU, INFO.reactant);
+    function onHill(pts, x){ var u=(x+3)/6*60, i=Math.max(0,Math.min(59,Math.floor(u))), f=u-i; return new THREE.Vector3().lerpVectors(pts[i],pts[i+1],f); }
+
+    /* ---------- rate gauge ---------- */
+    var gauge=new THREE.Mesh(new THREE.BoxGeometry(0.6,1,0.6), mat(0xE0417B)); g.add(gauge); reg('rate', gauge, INFO.rate);
+    var gaugeBase=new THREE.Mesh(new THREE.BoxGeometry(1.2,0.1,1.2), mat(0xD9D2E6)); gaugeBase.position.set(0,-5.6,0); g.add(gaugeBase);
 
     /* ---------- temperature slider ---------- */
-    var tempWrap=document.getElementById('enzTempWrap');
-    if(!tempWrap){
-      tempWrap=document.createElement('span');
-      tempWrap.id='enzTempWrap';
-      tempWrap.style.cssText='display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--page-mute)';
+    var wrap=document.getElementById('enzTempWrap'), slider, val;
+    if(!wrap){
+      wrap=document.createElement('span'); wrap.id='enzTempWrap';
+      wrap.style.cssText='display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--page-mute)';
       var lab=document.createElement('span'); lab.textContent='Temp';
-      var slider=document.createElement('input');
-      slider.type='range'; slider.id='enzTemp'; slider.min='20'; slider.max='80'; slider.step='1';
+      slider=document.createElement('input'); slider.type='range'; slider.id='enzTemp'; slider.min='5'; slider.max='80'; slider.step='1';
       slider.style.cssText='width:110px;vertical-align:middle;accent-color:#E0417B';
-      var val=document.createElement('span'); val.id='enzTempVal';
-      val.style.cssText='font-family:var(--mono);font-size:11px;min-width:36px;display:inline-block';
-      tempWrap.appendChild(lab); tempWrap.appendChild(slider); tempWrap.appendChild(val);
-      document.getElementById('bar').insertBefore(tempWrap, document.getElementById('lvl'));
-      slider.oninput=function(){ self._temp=parseInt(slider.value,10); val.textContent=self._temp+'°C'; };
-    }
-    tempWrap.setAttribute('data-model-ui','enzyme');
-    document.getElementById('enzTemp').value=self._temp;
-    document.getElementById('enzTempVal').textContent=self._temp+'°C';
+      val=document.createElement('span'); val.id='enzTempVal'; val.style.cssText='font-family:var(--mono);font-size:11px;min-width:36px;display:inline-block';
+      wrap.appendChild(lab); wrap.appendChild(slider); wrap.appendChild(val);
+      document.getElementById('bar').insertBefore(wrap, document.getElementById('lvl'));
+    } else { slider=document.getElementById('enzTemp'); val=document.getElementById('enzTempVal'); }
+    wrap.setAttribute('data-model-ui','enzyme');
+    slider.oninput=function(){ self._temp=parseInt(slider.value,10); val.textContent=self._temp+'°C'; };
+    function setTemp(v){ self._temp=v; slider.value=v; val.textContent=v+'°C'; }
+    setTemp(37);
+
+    self._parts={tp:tp, bl:bl, TP:TP, BL:BL, substrate:substrate, product:product, wrong:wrong, wall:wall, penTP:penTP, penRing:penRing, penBody:penBody,
+      noncomp:noncomp, unPts:unPts, caPts:caPts, ballC:ballC, ballU:ballU, onHill:onHill, gauge:gauge};
   },
+  onPick:function(info){ return this._K.onPick(info); },
+  onReset:function(){ this._K.onReset(); },
+
   tick:function(t){
-    var self=this, enz=self._enz;
-    if(!enz) return;
-    var step=self._step, denature=Math.max(0,Math.min(1,(self._temp-42)/38));
+    var self=this, P=self._parts; if(!P) return;
+    var f=self._K.tick(t), at=f.at;
+    if(self._modeStart===null) self._modeStart=at;
+    var lt=at-self._modeStart, mode=self._mode, T=self._temp;
+    function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+    /* rate rises with temperature to an optimum, then collapses as the enzyme denatures */
+    var rate = T<=38 ? 0.15+0.85*clamp((T-5)/33,0,1) : T<=42 ? 1 : clamp(1-(T-42)/13,0,1);
+    var den=clamp((T-42)/30,0,1);
+    var ta=lt*Math.max(rate,0.35);                        /* the enzyme's own clock: faster at the optimum, crawling when cold or cooked */
+    var jammed = (mode==='penicillin'||mode==='noncomp') && lt>1.2;
+    var ph=(ta%5)/5;
 
-    var CYCLE=5.0, phase=(t%CYCLE)/CYCLE;
+    /* ---------- transpeptidase: lobes, substrate, product ---------- */
+    var working = mode!=='penicillin' && mode!=='noncomp' && den<0.15;
+    var closeAmt = working ? (ph>=0.25&&ph<0.55 ? (ph-0.25)/0.3 : ph>=0.55&&ph<0.9 ? 1-(ph-0.55)/0.35 : 0) : 0;
+    var bound = mode==='noncomp' ? clamp((lt-1.2)/0.6,0,1) : 0;
+    P.tp.A.position.x=-1.3+closeAmt*0.2-den*1.3; P.tp.A.rotation.z=den*0.6;
+    P.tp.B.position.x=1.3-closeAmt*0.2+bound*0.35+den*0.9; P.tp.B.rotation.z=-bound*0.55-den*0.9;
+    P.tp.mat.color.lerpColors(P.tp.healthy,P.tp.dull,den);
 
-    /* ---------- lobes: induced fit / allosteric deform / denaturation ---------- */
-    var closeAmt=0;
-    if(step===0 && denature<0.15){
-      if(phase>=0.25 && phase<0.55) closeAmt=(phase-0.25)/0.30;
-      else if(phase>=0.55 && phase<0.9) closeAmt=1-(phase-0.55)/0.35;
-    }
-    var ax=-1.05+closeAmt*0.15, bx=1.05-closeAmt*0.15, arz=0, brz=0;
-    if(step===2){
-      var bound=0;
-      if(phase>=0.25 && phase<0.9) bound=Math.min(1,(phase-0.25)/0.15);
-      if(phase>=0.9) bound=Math.max(0,1-(phase-0.9)/0.10);
-      brz=-bound*0.55; bx+=bound*0.35;
-    }
-    ax-=denature*1.3; arz+=denature*0.6;
-    bx+=denature*0.9; brz-=denature*0.9;
-    enz.lobeA.position.x=ax; enz.lobeA.rotation.z=arz;
-    enz.lobeB.position.x=bx; enz.lobeB.rotation.z=brz;
-    enz.lobeMat.color.lerpColors(enz.healthyColor, enz.denaturedColor, denature);
-
-    /* ---------- active ligand position ---------- */
-    var target = step===2 ? new THREE.Vector3(2.6+denature*0.3, 0.3+denature*1.8, 0.8)
-                           : new THREE.Vector3(0, denature*1.8, 0);
-    var from=target.clone(); from.y=3.4;
-    var pos;
-    if(phase<0.25) pos=from.clone().lerp(target, phase/0.25);
-    else if(phase<0.9) pos=target.clone();
-    else pos=target.clone().lerp(from,(phase-0.9)/0.10);
-
-    var cleaving = step===0 && denature<0.15 && phase>=0.50 && phase<0.62;
-    enz.ringA.material.color.setHex(cleaving?0xFFFFFF:0xE0417B);
-
-    if(step===0 && denature<0.15 && phase>=0.55 && phase<0.9){
-      var sep=(phase-0.55)/0.35;
-      enz.ringA.position.copy(pos).add(new THREE.Vector3(-sep*1.6, sep*0.6, 0));
-      enz.bodyGrp.position.copy(pos).add(new THREE.Vector3(sep*1.6, -sep*0.3, 0));
-      var fade=Math.max(0.15,1-sep*0.85);
-      enz.ringA.scale.setScalar(fade); enz.bodyGrp.scale.setScalar(fade);
+    var S=P.substrate, PR=P.product, site=P.TP;
+    if(working){
+      var from=site.clone().add(new THREE.Vector3(0,3.4,0));
+      if(ph<0.25){ S.visible=true; S.position.lerpVectors(from,site,ph/0.25); PR.visible=false; }
+      else if(ph<0.5){ S.visible=true; S.position.copy(site); PR.visible=false; }
+      else if(ph<0.9){ S.visible=false; PR.visible=true; var u=(ph-0.5)/0.4; PR.position.lerpVectors(site, site.clone().add(new THREE.Vector3(-4.6,0.5,0)), u); PR.scale.setScalar(0.75*(1-0.6*u)); }
+      else { S.visible=true; S.position.copy(from); PR.visible=false; }
     } else {
-      enz.ringA.position.copy(pos); enz.bodyGrp.position.copy(pos);
-      enz.ringA.scale.setScalar(1); enz.bodyGrp.scale.setScalar(1);
+      /* site blocked or enzyme denatured: substrate arrives, cannot bind, backs off */
+      S.visible=true; PR.visible=false;
+      var p=(Math.sin(ta*1.3)+1)/2; S.position.copy(site).add(new THREE.Vector3(0.1, 0.9+p*2.4+den*0.8, 0));
+    }
+    var pw=((at*0.9)%7)/7, pw2=(Math.sin(pw*Math.PI))*1;                /* the wrong substrate always bumps off */
+    P.wrong.position.copy(site).add(new THREE.Vector3(0.95, 1.4+2.2*(1-pw2), 0.3)); P.wrong.rotation.y=at*0.8;
+
+    /* penicillin on transpeptidase, noncompetitive inhibitor */
+    P.penTP.visible = mode==='penicillin';
+    if(mode==='penicillin'){ var pa=clamp(lt/1.2,0,1); P.penTP.position.lerpVectors(site.clone().add(new THREE.Vector3(2.6,3.6,0)), site.clone().add(new THREE.Vector3(0,den*1.6,0)), pa); }
+    P.noncomp.visible = mode==='noncomp';
+    if(mode==='noncomp'){ var na=clamp(lt/1.2,0,1); P.noncomp.position.lerpVectors(site.clone().add(new THREE.Vector3(3.2,3.2,1.2)), site.clone().add(new THREE.Vector3(2.3+den*0.9,0.4,0.8)), na); P.noncomp.rotation.y=at; }
+
+    /* ---------- beta-lactamase: hydrolyzes penicillin in resistance mode ---------- */
+    var res = mode==='resistance' && den<0.15;
+    var bclose = res ? (ph>=0.25&&ph<0.55 ? (ph-0.25)/0.3 : ph>=0.55&&ph<0.9 ? 1-(ph-0.55)/0.35 : 0) : 0;
+    P.bl.A.position.x=-1.3+bclose*0.2-den*1.3; P.bl.A.rotation.z=den*0.6;
+    P.bl.B.position.x=1.3-bclose*0.2+den*0.9; P.bl.B.rotation.z=-den*0.9;
+    P.bl.mat.color.lerpColors(P.bl.healthy,P.bl.dull,den);
+    var R=P.penRing, Bd=P.penBody, bsite=P.BL;
+    R.visible = Bd.visible = mode==='resistance';
+    if(mode==='resistance'){
+      var bfrom=bsite.clone().add(new THREE.Vector3(0,3.4,0));
+      var target=bsite.clone().add(new THREE.Vector3(0,den*1.8,0)), pos;
+      if(!res){ var q=(Math.sin(ta*1.3)+1)/2; pos=bsite.clone().add(new THREE.Vector3(0,0.9+q*2.4+den*0.8,0)); }
+      else if(ph<0.25) pos=bfrom.clone().lerp(target,ph/0.25);
+      else if(ph<0.9) pos=target.clone();
+      else pos=target.clone().lerp(bfrom,(ph-0.9)/0.1);
+      R.material.color.setHex(res && ph>=0.5 && ph<0.62 ? 0xFFFFFF : 0xE0417B);
+      if(res && ph>=0.55 && ph<0.9){
+        var sep=(ph-0.55)/0.35;
+        R.position.copy(pos).add(new THREE.Vector3(-sep*1.6, sep*0.6, 0)); Bd.position.copy(pos).add(new THREE.Vector3(sep*1.6,-sep*0.3,0));
+        var fade=Math.max(0.15,1-sep*0.85); R.scale.setScalar(fade); Bd.scale.setScalar(fade);
+      } else { R.position.copy(pos); Bd.position.copy(pos); R.scale.setScalar(1); Bd.scale.setScalar(1); }
     }
 
-    enz.ringA.visible = step===0; enz.bodyGrp.visible = step===0;
-    enz.compMesh.visible = step===1; enz.nonMesh.visible = step===2;
-    if(step===1) enz.compMesh.position.copy(pos);
-    if(step===2) enz.nonMesh.position.copy(pos);
+    /* ---------- activation-energy diagram and rate gauge ---------- */
+    var hc=((at*Math.max(rate,0.2)*0.5)%2)/2, xc=-3+6*hc;
+    P.ballC.position.copy(P.onHill(P.caPts, xc)).add(new THREE.Vector3(0,0.2,0));
+    var hu=(Math.sin(at*1.1)+1)/2, xu=-3+1.5*hu;                              /* without the enzyme: climbs a little, rolls back */
+    P.ballU.position.copy(P.onHill(P.unPts, xu)).add(new THREE.Vector3(0,0.2,0.25));
+    var h=0.08+3.2*rate;
+    P.gauge.scale.y=h; P.gauge.position.set(0,-5.55+h/2,0);
+    P.gauge.material.color.setHex(den>0.5 ? 0x8A8272 : rate>0.85 ? 0xE0417B : 0xF0A73A);
   }
 });
 
 /* ============================================================
-   MODEL 5 — Mitosis & Meiosis (Levels 17–18)
-   Four chromosomes (2 homologous pairs, maternal/paternal colored).
-   A Mode toggle switches mitosis/meiosis; a Step button advances
-   phases within whichever mode is active. Every chromatid's position
-   is a pure function of (pair, parent, sister) + phase, animated by
-   lerping from the previous step's settled pose to the new one.
+   MODEL 5 — Cell Cycle, Mitosis & Meiosis (Levels 17–18)
+   Eight chromatids (2 homologous pairs, maternal pink / paternal
+   blue) whose positions are pure functions of (mode, phase). A cell-
+   cycle wheel (G1/S/G2/M with checkpoints) tracks where the cell is.
+   Mitosis: G1 -> S (replication) -> prophase -> metaphase -> anaphase
+   -> telophase + cytokinesis (animal furrow or plant cell plate) ->
+   two identical cells -> differentiation -> what happens when the
+   checkpoints fail (cancer). Meiosis: crossing over, independent
+   assortment (reshuffled each visit), the reduction division, meiosis
+   II, four distinct gametes, fertilization to a zygote, and
+   nondisjunction. Tour + Quiz via teachKit; a Mode button toggles
+   mitosis/meiosis for free exploration.
    ============================================================ */
 MODELS.push({
   id:'division',
   name:'5 · Mitosis & Meiosis',
   level:'Levels 17–18 · 3.1.9-12.D/Q',
-  hint:'Click a chromosome for its origin · Mode toggles mitosis/meiosis · Step advances the phase',
-  radius:10,
+  hint:'Click anything to focus on it · Tour walks the cell cycle, mitosis and meiosis · Mode toggles mitosis/meiosis',
+  radius:12,
   build:function(ctx){
     var g=ctx.group, self=this;
-    if(self._mode===undefined) self._mode='mitosis';
-    if(self._step===undefined) self._step=0;
+    var MIT=['g1','s','prophase','metaphase','anaphase','telophase','result','differentiation','cancer'];
+    var MEI=['interphase','prophaseI','metaphaseI','anaphaseI','telophaseI','meiosisII','result','fertilization','nondisjunction'];
+    self._mode='mitosis'; self._phase='g1'; self._cyto='animal'; self._orient=[true,false]; self._phaseStart=null;
+    var MCOLOR=0xE0417B, PCOLOR=0x8FA8E8, OCOLOR=0x2FB8A0, LEN1=1.5, LEN2=1.05, POLE=2.6;
 
-    function pick(container, info){
-      container.userData.info=info;
-      if(container.isMesh) PICKABLE.push(container);
-      container.traverse(function(o){ if(o!==container && o.isMesh) PICKABLE.push(o); });
-    }
-    function stretchSegment(mesh,p1,p2){
-      var dir=new THREE.Vector3().subVectors(p2,p1);
-      var len=Math.max(dir.length(),0.001);
-      mesh.position.copy(p1).addScaledVector(dir,0.5);
-      mesh.scale.set(1,len,1);
-      mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), dir.clone().normalize());
-      mesh.visible=true;
-    }
+    var INFO={
+      'maternal':{tag:'Chromosome', title:'Maternal chromosome',
+        body:'Inherited from the mother. A human cell has 46 chromosomes in 23 homologous pairs; here, two pairs stand in for all 23. In S phase each is copied into two identical sister chromatids joined at a centromere.'},
+      'paternal':{tag:'Chromosome', title:'Paternal chromosome',
+        body:'Inherited from the father. It carries the same genes as its maternal homolog but not necessarily the same alleles — which is what crossing over and independent assortment shuffle into new combinations.'},
+      'recombinant':{tag:'Chromosome', title:'Chromosome (recombines in meiosis)',
+        body:'In prophase I this chromatid pairs with its homolog and trades a segment — watch its tip change color. Crossing over makes allele combinations that existed in neither parent, a major source of variation.'},
+      'partner':{tag:'Fertilization', title:'Chromosome from the other gamete',
+        body:'A haploid set arriving in the second gamete. n + n = 2n: fertilization restores the diploid number — 46 in humans — in a brand-new combination of alleles.'},
+      'spindle':{tag:'Division', title:'Spindle fiber',
+        body:'Microtubules reaching from a pole to a chromosome’s centromere. They line chromosomes up at the equator and then pull them apart — in mitosis one fiber from each pole grips each sister chromatid; in meiosis I both sisters of a homolog face the same pole.'},
+      'centromere':{tag:'Chromosome', title:'Centromere',
+        body:'Where the two sister chromatids are held together after S phase, and where spindle fibers attach. It lets go in anaphase (mitosis) or anaphase II (meiosis).'},
+      'envelope':{tag:'Interphase', title:'Nuclear envelope',
+        body:'Encloses the chromosomes through interphase, when they are loose and being copied. It breaks down in prophase so the spindle can reach them, and re-forms around each new set in telophase.'},
+      'plate':{tag:'Division', title:'Metaphase plate',
+        body:'The cell’s equator, where chromosomes line up before being pulled apart. In meiosis I it is homologous pairs that line up here, and which homolog faces which pole is random — independent assortment.'},
+      'daughter':{tag:'Mitosis', title:'Daughter cell',
+        body:'One of two genetically identical diploid cells — 46 chromosomes each, exactly like the parent, because DNA replicated once and divided once. Growth, repair, asexual reproduction.'},
+      'cell-plate':{tag:'Cytokinesis', title:'Cell plate',
+        body:'A plant cell cannot pinch inward through its rigid wall, so vesicles build a new wall from the middle outward — the cell plate. Animal cells divide by a cleavage furrow instead.'},
+      'cycle-g1':{tag:'Cell cycle', title:'G1 — growth',
+        body:'Most of the cycle. The cell grows and does its job. At the end of G1 a checkpoint asks whether conditions and DNA are good enough to commit to copying.'},
+      'cycle-s':{tag:'Cell cycle', title:'S — synthesis',
+        body:'DNA replication. Every chromosome is copied into two sister chromatids. Only after S can a cell divide and give each daughter a full set.'},
+      'cycle-g2':{tag:'Cell cycle', title:'G2 — preparation',
+        body:'The cell checks the copied DNA for errors and builds what division needs. The G2 checkpoint halts the cycle if replication went wrong.'},
+      'cycle-m':{tag:'Cell cycle', title:'M — mitosis and cytokinesis',
+        body:'The short, dramatic part: prophase, metaphase, anaphase, telophase, then the cytoplasm divides. A checkpoint inside M waits until every chromosome is attached to the spindle.'},
+      'checkpoint':{tag:'Cell cycle', title:'Checkpoint',
+        body:'A control point where signaling proteins verify conditions — DNA intact, replication complete, spindle attached — before letting the cycle continue. When the genes for these brakes mutate, division runs uncontrolled: that is cancer.'},
+      'tumor':{tag:'Cancer', title:'Uncontrolled division',
+        body:'Cells whose checkpoint genes have mutated keep dividing with the brakes off and the accelerator jammed. The mass is a tumor; if cells break away and spread to distant tissue it is malignant — metastasis.'},
+      'gamete':{tag:'Meiosis', title:'Gamete',
+        body:'A haploid cell — one chromosome from each pair, 23 in a human sperm or egg — and genetically distinct from every other gamete thanks to crossing over and independent assortment.'},
+      'gamete-aneuploid':{tag:'Nondisjunction', title:'Gamete with the wrong number',
+        body:'A pair failed to separate, so this gamete has an extra chromosome or is missing one. Fertilized, an extra copy makes a trisomy — three copies of chromosome 21 is Down syndrome, 47 chromosomes instead of 46.'},
+      'zygote':{tag:'Fertilization', title:'Zygote',
+        body:'Egg plus sperm: two haploid sets become one diploid cell, 2n = 46, with an allele combination that has never existed before. Every cell of the body will be made from it by mitosis.'}
+    };
 
-    var MCOLOR=0xE0417B, PCOLOR=0x8FA8E8, LEN1=1.5, LEN2=1.05;
+    /* ---------- tour + quiz ---------- */
+    function setPhase(mode, phase, opt){
+      opt=opt||{};
+      if(opt.reshuffle) self._orient=[Math.random()<0.5, Math.random()<0.5];
+      self._cyto=opt.cyto||'animal';
+      self._mode=mode; self._phase=phase; self._phaseStart=null; self._phaseOffset=opt.offset||0;
+      if(modeBtn) modeBtn.textContent = mode==='mitosis' ? 'Mode: mitosis' : 'Mode: meiosis';
+    }
+    var STOPS=[
+      {tag:'Cell cycle', focus:'cycle-g1', r:7, keys:['cycle-g1','cycle-s','cycle-g2','cycle-m','checkpoint'], set:['mitosis','g1'], title:'The cell cycle',
+       body:'Most of a cell’s life is interphase: G1 growth, S when DNA is copied, G2 preparation. Division — M — is the short last arc. The white beads are checkpoints: before each transition, signals verify the DNA is intact and the job is done, or the cycle halts for repair.'},
+      {tag:'S phase', focus:'maternal', r:10, keys:['maternal','paternal','centromere'], set:['mitosis','s'], title:'S phase: every chromosome is copied',
+       body:'In G1 each chromosome was a single chromatid. In S phase it is replicated into two identical sister chromatids joined at a centromere. The chromosome count has not changed — 46 chromosomes, now with twice the DNA, ready to be shared out.'},
+      {tag:'Mitosis', focus:'spindle', r:10, keys:['spindle','envelope'], set:['mitosis','prophase'], title:'Prophase: condense, dissolve, build the spindle',
+       body:'Chromosomes condense into the thick X shapes you can see. The nuclear envelope breaks down, and spindle fibers grow from the two poles to reach each centromere.'},
+      {tag:'Mitosis', focus:'plate', r:10, keys:['plate','spindle'], set:['mitosis','metaphase'], title:'Metaphase: lined up at the equator',
+       body:'M for middle. Every chromosome sits on the metaphase plate with a fiber from each pole gripping each sister chromatid. The spindle checkpoint waits here until all of them are attached.'},
+      {tag:'Mitosis', focus:'maternal', r:10, keys:['maternal','paternal','spindle'], set:['mitosis','anaphase'], title:'Anaphase: sister chromatids separate',
+       body:'A for apart. The centromeres let go and each sister chromatid is pulled to the opposite pole. Each end now holds a complete set — this step is what guarantees both daughters get everything.'},
+      {tag:'Cytokinesis', focus:'daughter', r:11, keys:['daughter'], set:['mitosis','telophase',{cyto:'animal'}], title:'Telophase and an animal cell’s cleavage furrow',
+       body:'Nuclear envelopes re-form around each set and the chromosomes relax. Then the cytoplasm divides: an animal cell pinches in from the outside, a cleavage furrow tightening until two cells remain.'},
+      {tag:'Cytokinesis', focus:'cell-plate', r:11, keys:['cell-plate'], set:['mitosis','telophase',{cyto:'plant'}], title:'A plant cell builds a cell plate',
+       body:'A rigid wall cannot pinch. Instead vesicles fuse along the equator into a cell plate that grows outward until it meets the old wall and becomes a new one. Same mitosis, different cytokinesis.'},
+      {tag:'Mitosis', focus:'daughter', r:11, keys:['daughter'], set:['mitosis','result'], title:'Two identical diploid cells',
+       body:'46 in, 46 in each daughter: DNA copied once, divided once. The two cells are genetically identical — mitosis is for growth, repair and asexual reproduction, not variation.'},
+      {tag:'Differentiation', focus:'daughter', r:11, keys:['daughter'], set:['mitosis','differentiation'], title:'Same genome, different genes switched on',
+       body:'Both cells carry identical instructions, yet one is becoming a long nerve cell and the other a flat skin cell. Differentiation is a matter of which genes are expressed. Stem cells keep the option open: they can divide and become more than one cell type, which is why they matter for repair and regenerative medicine.'},
+      {tag:'Cancer', focus:'tumor', r:9, keys:['tumor','checkpoint'], set:['mitosis','cancer'], title:'When the checkpoints fail',
+       body:'Mutate the genes that run the checkpoints and the brakes come off: cells divide without being asked, piling into a tumor. If cells break away and seed distant tissue the cancer is malignant — metastasis. The cell cycle’s controls are the difference between repair and disease.'},
+      {tag:'Meiosis', focus:'recombinant', r:9, keys:['recombinant'], set:['meiosis','prophaseI'], title:'Prophase I: crossing over',
+       body:'Meiosis starts like mitosis — chromosomes already copied — then does something mitosis never does: homologous pairs come together as tetrads and swap segments. Watch the tips trade colors. New allele combinations, before a single division has happened.'},
+      {tag:'Meiosis', focus:'plate', r:10, keys:['plate','spindle'], set:['meiosis','metaphaseI',{reshuffle:true}], title:'Metaphase I: independent assortment',
+       body:'Pairs, not single chromosomes, line up on the plate — and which homolog faces which pole is random for every pair. Visit this stop again and the arrangement reshuffles. With 23 pairs that is 2²³, over 8 million, possible gametes from orientation alone.'},
+      {tag:'Meiosis', focus:'maternal', r:10, keys:['maternal','paternal','recombinant','spindle'], set:['meiosis','anaphaseI'], title:'Anaphase I — the reduction division',
+       body:'Homologous pairs separate; sister chromatids stay together. Each pole now has half the pairs — the chromosome number has just been halved. This is the step that makes meiosis different from mitosis, and why a gamete ends up with 23 instead of 46.'},
+      {tag:'Meiosis', focus:'maternal', r:10, keys:['maternal','paternal','spindle'], set:['meiosis','meiosisII'], title:'Meiosis II: sisters finally separate',
+       body:'Each of the two cells divides again, and this time it is the sister chromatids that are pulled apart — the same event as mitotic anaphase, but starting from a haploid set. One replication, two divisions.'},
+      {tag:'Meiosis', focus:'gamete', r:12, keys:['gamete'], set:['meiosis','result'], title:'Four genetically distinct haploid gametes',
+       body:'Four cells, each with one chromosome from every pair — 23 in a human — and no two alike, thanks to crossing over and independent assortment. Mitosis gave two identical cells from one division; meiosis gives four different ones from two.'},
+      {tag:'Fertilization', focus:'zygote', r:9, keys:['zygote','partner'], set:['meiosis','fertilization'], title:'Fertilization restores the diploid number',
+       body:'One gamete from this cell meets a gamete from the other parent. n + n = 2n: the zygote has 46 chromosomes again, in a combination that has never existed. Sexual reproduction’s whole point is this variation — the raw material natural selection works on.'},
+      {tag:'Nondisjunction', focus:'gamete-aneuploid', r:12, keys:['gamete-aneuploid'], set:['meiosis','nondisjunction'], title:'Nondisjunction',
+       body:'Here the smaller pair failed to separate in anaphase I, so both homologs went to the same pole. Two gametes carry an extra chromosome and two are missing one. Fertilize the extra one and the embryo has three copies — trisomy. Three copies of chromosome 21 is Down syndrome: 47 chromosomes instead of 46.'}
+    ];
+    STOPS.forEach(function(st){ st.enter=function(){ setPhase(st.set[0], st.set[1], st.set[2]); }; });
+    var QUIZ=[
+      {q:'Click the phase of the cell cycle in which DNA is replicated.', keys:['cycle-s'], enter:function(){ setPhase('mitosis','s'); },
+       ok:'S phase — synthesis. Every chromosome is copied into two sister chromatids.', hint:'The amber arc of the cycle wheel.'},
+      {q:'Click a checkpoint — where the cycle verifies DNA before continuing.', keys:['checkpoint'], enter:function(){ setPhase('mitosis','g1'); },
+       ok:'A checkpoint. When their genes mutate, division runs uncontrolled.', hint:'The white beads on the cycle wheel.'},
+      {q:'Click a centromere — where sister chromatids are held together after S phase.', keys:['centromere'], enter:function(){ setPhase('mitosis','s'); },
+       ok:'The centromere: it holds the sisters together and is where spindle fibers attach.', hint:'The white bead between two sister chromatids.'},
+      {q:'Click a chromosome lined up at the equator in metaphase.', keys:['maternal','paternal','recombinant'], enter:function(){ setPhase('mitosis','metaphase'); },
+       ok:'Lined up on the metaphase plate, each with fibers from both poles.', hint:'Any of the chromosomes in the middle row.'},
+      {q:'Click a spindle fiber.', keys:['spindle'], enter:function(){ setPhase('mitosis','metaphase'); },
+       ok:'A spindle fiber — it lines chromosomes up and then pulls them apart.', hint:'The thin pale lines running from the poles to the chromosomes.'},
+      {q:'Click a sister chromatid that has just separated in anaphase.', keys:['maternal','paternal','recombinant'], enter:function(){ setPhase('mitosis','anaphase'); },
+       ok:'Anaphase — apart. Each pole gets a complete set.', hint:'Any chromatid being pulled toward a pole.'},
+      {q:'Click the cell plate forming in a dividing plant cell.', keys:['cell-plate'], enter:function(){ setPhase('mitosis','telophase',{cyto:'plant',offset:2}); },
+       ok:'The cell plate: a new wall built from the middle outward.', hint:'The flat disc across the middle of the boxed plant cell.'},
+      {q:'Click one of the two identical daughter cells mitosis produces.', keys:['daughter'], enter:function(){ setPhase('mitosis','result'); },
+       ok:'A diploid daughter cell — 46 chromosomes, identical to the parent.', hint:'Either of the two cell outlines at the poles.'},
+      {q:'Click the uncontrolled mass of dividing cells — cancer.', keys:['tumor'], enter:function(){ setPhase('mitosis','cancer',{offset:5}); },
+       ok:'A tumor: checkpoint genes mutated, brakes off.', hint:'The cluster of small pink cells piling up to the right.'},
+      {q:'Click a chromatid that has crossed over — it carries a segment from the other parent.', keys:['recombinant'], enter:function(){ setPhase('meiosis','prophaseI'); },
+       ok:'A recombinant chromatid: its tip came from the homolog.', hint:'Look for a chromatid whose tip is the other color.'},
+      {q:'Click the plate where homologous pairs line up randomly — independent assortment.', keys:['plate'], enter:function(){ setPhase('meiosis','metaphaseI',{reshuffle:true}); },
+       ok:'The metaphase plate. Random orientation of 23 pairs gives over 8 million combinations.', hint:'The translucent disc across the cell’s equator.'},
+      {q:'Click a haploid gamete.', keys:['gamete'], enter:function(){ setPhase('meiosis','result'); },
+       ok:'A gamete: one chromosome from each pair, 23 in a human.', hint:'Any of the four small cells.'},
+      {q:'Click the zygote formed by fertilization.', keys:['zygote'], enter:function(){ setPhase('meiosis','fertilization',{offset:2}); },
+       ok:'The zygote: n + n = 2n, the diploid number restored.', hint:'The large cell in the center where the two gametes met.'},
+      {q:'Click a chromosome that arrived in the OTHER gamete at fertilization.', keys:['partner'], enter:function(){ setPhase('meiosis','fertilization',{offset:2}); },
+       ok:'A haploid set from the other parent — together with ours, 2n again.', hint:'The teal chromosomes inside the zygote.'},
+      {q:'Click the nuclear envelope that encloses the chromosomes during interphase.', keys:['envelope'], enter:function(){ setPhase('mitosis','g1'); },
+       ok:'The nuclear envelope. It breaks down in prophase so the spindle can reach the chromosomes.', hint:'The faint violet sphere around the loose chromosomes.'},
+      {q:'Click a gamete with the wrong chromosome number — the result of nondisjunction.', keys:['gamete-aneuploid'], enter:function(){ setPhase('meiosis','nondisjunction'); },
+       ok:'Aneuploid: an extra or a missing chromosome. An extra 21 fertilized gives trisomy 21.', hint:'The cells with three chromosomes, or with only one.'}
+    ];
+    var K=teachKit(self, {id:'division', radius:12, stops:STOPS, quiz:QUIZ, onTourEnd:function(){ setPhase('mitosis','g1'); }});
+    var reg=K.register;
+
+    /* ---------- chromatids ---------- */
     function chromatidMesh(color,len){
       var grp=new THREE.Group();
       var upper=rod(0.09,len*0.42,color); upper.position.y=len*0.29;
       var lower=rod(0.09,len*0.58,color); lower.position.y=-len*0.21;
-      grp.add(upper,lower);
-      grp.userData.upper=upper; grp.userData.lower=lower;
-      return grp;
+      grp.add(upper,lower); grp.userData.upper=upper; return grp;
     }
-
     var CHROM=[
-      {pair:1,parent:'M',sister:0},{pair:1,parent:'M',sister:1},
-      {pair:1,parent:'P',sister:0},{pair:1,parent:'P',sister:1},
-      {pair:2,parent:'M',sister:0},{pair:2,parent:'M',sister:1},
-      {pair:2,parent:'P',sister:0},{pair:2,parent:'P',sister:1}
+      {pair:1,parent:'M',sister:0},{pair:1,parent:'M',sister:1},{pair:1,parent:'P',sister:0},{pair:1,parent:'P',sister:1},
+      {pair:2,parent:'M',sister:0},{pair:2,parent:'M',sister:1},{pair:2,parent:'P',sister:0},{pair:2,parent:'P',sister:1}
     ];
-    var matInfo={tag:'Chromosome', title:'Maternal chromosome',
-      body:'Inherited from the mother. It was already replicated into two identical sister chromatids joined at a centromere back in S phase, before any of the division steps shown here.'};
-    var patInfo={tag:'Chromosome', title:'Paternal chromosome',
-      body:'Inherited from the father. It carries the same genes as its maternal homolog but not necessarily the same alleles — which is exactly what makes crossing over and independent assortment produce genetic variation.'};
     CHROM.forEach(function(c){
-      var color=c.parent==='M'?MCOLOR:PCOLOR, len=c.pair===1?LEN1:LEN2;
-      c.mesh=chromatidMesh(color,len); c.color=color;
-      g.add(c.mesh);
-      pick(c.mesh, c.parent==='M'?matInfo:patInfo);
+      c.color=c.parent==='M'?MCOLOR:PCOLOR; c.mesh=chromatidMesh(c.color, c.pair===1?LEN1:LEN2); g.add(c.mesh);
+      var key = (c.pair===1 && c.sister===0) ? 'recombinant' : (c.parent==='M'?'maternal':'paternal');
+      reg(key, c.mesh, INFO[key]);
     });
+    var PARTNER=[{pair:1},{pair:2}];
+    PARTNER.forEach(function(c){ c.mesh=chromatidMesh(OCOLOR, c.pair===1?LEN1:LEN2); c.mesh.visible=false; g.add(c.mesh); reg('partner', c.mesh, INFO.partner); });
     var SISTER_PAIRS=[[0,1],[2,3],[4,5],[6,7]];
-
-    var connectors=[]; for(var ci=0;ci<4;ci++){ var cm=rod(0.05,1,0xEFE9F7); cm.visible=false; g.add(cm); connectors.push(cm); }
-    var fibers=[]; for(var fi=0;fi<8;fi++){ var fm=rod(0.035,1,0xC9BEDD); fm.visible=false; g.add(fm); fibers.push(fm); }
-    var outlines=[]; for(var oi=0;oi<4;oi++){ var om=ball(1.0,0xB98BFF,20,{opacity:0.14}); om.visible=false; g.add(om); outlines.push(om); }
-
-    /* ---------- position functions: pure functions of (pair, parent, sister) ---------- */
-    function orderIdx(c){ return (c.pair-1)*2 + (c.parent==='M'?0:1); }
-    function interphasePos(c){
-      var col=(c.parent==='M')?-0.8:0.8, row=(c.pair===1)?1.5:-1.5, so=c.sister?0.3:-0.3;
-      return new THREE.Vector3(col+so*0.3, row+so*0.5, so);
-    }
-    function metaphasePos(c){ var x=(orderIdx(c)-1.5)*1.0; return new THREE.Vector3(x+(c.sister?0.12:-0.12),0,0); }
-    function anaphasePos(c){ var x=(orderIdx(c)-1.5)*1.0; return new THREE.Vector3(x, c.sister?2.6:-2.6, 0); }
-    function prophaseIPos(c){
-      var pairX=(c.pair===1)?-1.0:1.0, po=(c.parent==='M')?-0.35:0.35, so=c.sister?0.12:-0.12;
-      return new THREE.Vector3(pairX+po+so,0,0);
-    }
-    function anaphaseIPos(c){
-      var pairX=(c.pair===1)?-0.6:0.6, poleY=(c.parent==='M')?2.6:-2.6, so=c.sister?0.12:-0.12;
-      return new THREE.Vector3(pairX+so,poleY,0);
-    }
-    function meiosisIIPos(c){
-      var pairX=(c.pair===1)?-0.6:0.6, poleY=(c.parent==='M')?2.6:-2.6, spread=c.sister?0.55:-0.55;
-      return new THREE.Vector3(pairX+spread*0.5, poleY+spread, 0);
-    }
-    function resultMeiosisPos(c){
-      var cx=(c.sister===0)?-2.0:2.0, cy=(c.parent==='M')?2.6:-2.6, po=(c.pair===1)?-0.3:0.3;
-      return new THREE.Vector3(cx+po,cy,0);
-    }
-    function targetFor(mode,step,c){
-      if(mode==='mitosis'){
-        if(step===0) return interphasePos(c);
-        if(step===1) return metaphasePos(c);
-        return anaphasePos(c);
-      }
-      if(step===0) return interphasePos(c);
-      if(step===1) return prophaseIPos(c);
-      if(step===2) return anaphaseIPos(c);
-      if(step===3) return meiosisIIPos(c);
-      return resultMeiosisPos(c);
-    }
-    function poleFor(mode,step,c){
-      if(mode==='mitosis'){
-        if(step!==1 && step!==2) return null;
-        return new THREE.Vector3(0, c.sister?3.2:-3.2, 0);
-      }
-      if(step===2) return new THREE.Vector3(0, c.parent==='M'?3.2:-3.2, 0);
-      if(step===3) return new THREE.Vector3(0, (c.parent==='M'?2.6:-2.6)+(c.sister?1.0:-1.0), 0);
-      return null;
+    var connectors=[], fibers=[];
+    for(var ci=0;ci<4;ci++){ var cm=ball(0.15,0xEFE9F7,10); cm.visible=false; g.add(cm); connectors.push(cm); reg('centromere', cm, INFO.centromere); }
+    for(var fi=0;fi<8;fi++){ var fm=rod(0.035,1,0xC9BEDD); fm.visible=false; g.add(fm); fibers.push(fm); reg('spindle', fm, INFO.spindle); }
+    function stretch(mesh,p1,p2){
+      var dir=new THREE.Vector3().subVectors(p2,p1), len=Math.max(dir.length(),0.001);
+      mesh.position.copy(p1).addScaledVector(dir,0.5); mesh.scale.set(1,len,1);
+      mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), dir.clone().normalize()); mesh.visible=true;
     }
 
-    self._div={
-      CHROM:CHROM, connectors:connectors, fibers:fibers, outlines:outlines, SISTER_PAIRS:SISTER_PAIRS,
-      MCOLOR:MCOLOR, PCOLOR:PCOLOR, targetFor:targetFor, poleFor:poleFor,
-      lastMode:null, lastStep:-1, transStart:0, stretchSegment:stretchSegment
-    };
-    CHROM.forEach(function(c){ c.mesh.position.copy(interphasePos(c)); });
+    /* ---------- cell outlines, plate, envelope, zygote, plant wall, tumor ---------- */
+    function shell(r,hex,op){ var s=ball(r,hex,22,{opacity:op,side:THREE.DoubleSide}); s.visible=false; g.add(s); return s; }
+    var daughters=[shell(1.0,0xB98BFF,0.16), shell(1.0,0xB98BFF,0.16)]; daughters.forEach(function(s){ reg('daughter', s, INFO.daughter, true); });
+    var gametes=[shell(1.0,0xB98BFF,0.16), shell(1.0,0xB98BFF,0.16), shell(1.0,0xB98BFF,0.16), shell(1.0,0xB98BFF,0.16)]; gametes.forEach(function(s){ reg('gamete', s, INFO.gamete, true); });
+    var aneu=[shell(1.0,0xE87FB0,0.2), shell(1.0,0xE87FB0,0.2), shell(1.0,0xE87FB0,0.2), shell(1.0,0xE87FB0,0.2)]; aneu.forEach(function(s){ reg('gamete-aneuploid', s, INFO['gamete-aneuploid'], true); });
+    var envelope=shell(2.3,0x6B4BA8,0.14); reg('envelope', envelope, INFO.envelope, true);
+    var zygote=shell(2.2,0xF0A73A,0.16); reg('zygote', zygote, INFO.zygote, true);
+    var plate=new THREE.Mesh(new THREE.CylinderGeometry(2.3,2.3,0.06,32), mat(0xEFE9F7,{opacity:0.25,side:THREE.DoubleSide})); plate.visible=false; g.add(plate); reg('plate', plate, INFO.plate, true);
+    var plantWall=new THREE.Mesh(new THREE.BoxGeometry(5.2,7.4,4.6), mat(0x7BC47F,{opacity:0.14,side:THREE.DoubleSide})); plantWall.visible=false; g.add(plantWall); plantWall.userData.passThrough=true;
+    var cellPlate=new THREE.Mesh(new THREE.CylinderGeometry(2.4,2.4,0.14,32), mat(0x7BC47F,{opacity:0.6,side:THREE.DoubleSide})); cellPlate.visible=false; g.add(cellPlate); reg('cell-plate', cellPlate, INFO['cell-plate']);
+    var tumor=new THREE.Group(); tumor.position.set(4.8,2.4,-0.8); g.add(tumor);
+    var tumorCells=[];
+    for(var ti=0; ti<12; ti++){ var tc=ball(0.42,0xE87FB0,12); var ang=ti*2.4, rr=0.3+ti*0.17; tc.position.set(Math.cos(ang)*rr, Math.sin(ang)*rr*0.8, Math.sin(ti*1.7)*0.5); tc.visible=false; tumor.add(tc); tumorCells.push(tc); }
+    reg('tumor', tumor, INFO.tumor); /* registered after its cells exist, so they are pickable */
 
-    /* ---------- Mode + Step buttons ---------- */
-    var MITO_LABELS=['Interphase ▶','Metaphase: chromosomes align ▶',
-      'Anaphase: sister chromatids separate ▶','Result: 2 identical diploid cells ▶'];
-    var MEIO_LABELS=['Interphase ▶','Prophase I: crossing over ▶',
-      'Anaphase I — homologs separate: the reduction division ▶',
-      'Meiosis II: sister chromatids separate ▶','Result: 4 distinct haploid cells ▶'];
-
-    var stepBtn=document.getElementById('divStep');
-    if(!stepBtn){
-      stepBtn=document.createElement('button');
-      stepBtn.id='divStep'; stepBtn.className='btn';
-      document.getElementById('bar').insertBefore(stepBtn, document.getElementById('lvl'));
-      stepBtn.onclick=function(){
-        var labels=self._mode==='mitosis'?MITO_LABELS:MEIO_LABELS;
-        self._step=(self._step+1)%labels.length;
-        stepBtn.textContent=labels[self._step];
-      };
-    }
-    stepBtn.setAttribute('data-model-ui','division');
-    stepBtn.textContent=(self._mode==='mitosis'?MITO_LABELS:MEIO_LABELS)[self._step];
-
-    var modeBtn=document.getElementById('divMode');
-    if(!modeBtn){
-      modeBtn=document.createElement('button');
-      modeBtn.id='divMode'; modeBtn.className='btn ghost';
-      document.getElementById('bar').insertBefore(modeBtn, document.getElementById('lvl'));
-      modeBtn.onclick=function(){
-        self._mode=self._mode==='mitosis'?'meiosis':'mitosis';
-        self._step=0;
-        modeBtn.textContent=self._mode==='mitosis'?'Mitosis':'Meiosis';
-        stepBtn.textContent=(self._mode==='mitosis'?MITO_LABELS:MEIO_LABELS)[0];
-      };
-    }
-    modeBtn.setAttribute('data-model-ui','division');
-    modeBtn.textContent=self._mode==='mitosis'?'Mitosis':'Meiosis';
-  },
-  tick:function(t){
-    var self=this, div=self._div;
-    if(!div) return;
-    var mode=self._mode, step=self._step, CHROM=div.CHROM;
-
-    if(div.lastMode!==mode || div.lastStep!==step){
-      div.lastMode=mode; div.lastStep=step;
-      div.fromPos=CHROM.map(function(c){ return c.mesh.position.clone(); });
-      div.toPos=CHROM.map(function(c){ return div.targetFor(mode,step,c); });
-      div.transStart=t;
-    }
-    var tt=Math.min(1,(t-div.transStart)/1.1);
-    CHROM.forEach(function(c,idx){ c.mesh.position.lerpVectors(div.fromPos[idx], div.toPos[idx], tt); });
-
-    /* crossing over: pair 1's sister-0 chromatids swap color from Prophase I onward in meiosis */
-    CHROM.forEach(function(c){
-      var col=c.color;
-      if(c.pair===1 && c.sister===0 && mode==='meiosis' && step>=1) col=(c.parent==='M')?div.PCOLOR:div.MCOLOR;
-      c.mesh.userData.upper.material.color.setHex(col);
+    /* ---------- cell-cycle wheel ---------- */
+    var wheel=new THREE.Group(); wheel.position.set(-6.8,2.2,-1.5); g.add(wheel);
+    var ARCS=[['cycle-g1',0.45,0x8FA8E8],['cycle-s',0.25,0xF0A73A],['cycle-g2',0.18,0x7BC47F],['cycle-m',0.12,0xE0417B]];
+    var start=Math.PI/2, bounds=[];
+    ARCS.forEach(function(a){
+      var arc=new THREE.Mesh(new THREE.TorusGeometry(1.6,0.2,10,40,a[1]*Math.PI*2), mat(a[2]));
+      arc.rotation.z=start-a[1]*Math.PI*2; wheel.add(arc); reg(a[0], arc, INFO[a[0]]);
+      bounds.push([a[0], start, start-a[1]*Math.PI*2]); start-=a[1]*Math.PI*2;
     });
+    var cpAngles=[Math.PI/2-0.45*Math.PI*2, Math.PI/2-0.88*Math.PI*2, Math.PI/2-0.94*Math.PI*2];
+    cpAngles.forEach(function(an){ var cp=ball(0.17,0xEFE9F7,10); cp.position.set(Math.cos(an)*1.6, Math.sin(an)*1.6, 0.1); wheel.add(cp); reg('checkpoint', cp, INFO.checkpoint); });
+    var marker=ball(0.26,0x1C1530,12); wheel.add(marker);
+    var PHASE_ANGLE={g1:0.22, s:0.57, prophase:0.89, metaphase:0.92, anaphase:0.95, telophase:0.98, result:0.02, differentiation:0.08, cancer:0.9};
 
-    /* sister chromatids stay visibly joined until they actually separate */
-    var jointUntilStep = mode==='mitosis'?1:2;
-    div.SISTER_PAIRS.forEach(function(pair,idx){
-      var cm=div.connectors[idx], c0=CHROM[pair[0]], c1=CHROM[pair[1]];
-      if(step<=jointUntilStep) div.stretchSegment(cm, c0.mesh.position, c1.mesh.position);
-      else cm.visible=false;
+    /* ---------- where everything is, per (mode, phase) ---------- */
+    function orderIdx(c){ return (c.pair-1)*2+(c.parent==='M'?0:1); }
+    function topPole(c){
+      if(self._mode==='mitosis') return c.sister===1;
+      if(self._phase==='nondisjunction' && c.pair===2) return true;
+      return (c.parent==='M')===self._orient[c.pair-1];
+    }
+    function target(c){
+      var mode=self._mode, ph=self._phase, so=c.sister?0.12:-0.12;
+      if(mode==='mitosis'){
+        if(ph==='g1'||ph==='s'){ var col=(c.parent==='M')?-0.8:0.8, row=(c.pair===1)?1.4:-1.4; return new THREE.Vector3(col+(ph==='g1'?0:so*2.2), row+(c.sister?0.15:-0.15), c.sister?0.25:-0.25); }
+        if(ph==='prophase'){ var cc=(c.parent==='M')?-0.6:0.6, rw=(c.pair===1)?0.9:-0.9; return new THREE.Vector3(cc+so, rw, 0); }
+        if(ph==='metaphase') return new THREE.Vector3((orderIdx(c)-1.5)*1.0+so,0,0);
+        var ay=(c.sister?POLE:-POLE), ax=(orderIdx(c)-1.5)*0.75;
+        if(ph==='differentiation') return new THREE.Vector3(ax*0.5, c.sister?POLE+0.4+(orderIdx(c)-1.5)*0.5:-POLE, 0);
+        return new THREE.Vector3(ax, ay, 0);
+      }
+      if(ph==='interphase'){ var col2=(c.parent==='M')?-0.8:0.8, row2=(c.pair===1)?1.4:-1.4; return new THREE.Vector3(col2+so*2.2, row2+(c.sister?0.15:-0.15), c.sister?0.25:-0.25); }
+      if(ph==='prophaseI'||ph==='metaphaseI'){
+        var pairX=(c.pair===1)?-1.0:1.0, po=((c.parent==='M')===self._orient[c.pair-1])?-0.35:0.35;
+        return new THREE.Vector3(pairX+po+so, ph==='metaphaseI'?0:(c.pair===1?0.3:-0.3), 0);
+      }
+      var tp=topPole(c), py=tp?POLE:-POLE, px=(c.pair===1)?-0.6:0.6;
+      if(ph==='nondisjunction' && c.pair===2) px += (c.parent==='M')?-0.3:0.3;
+      if(ph==='anaphaseI'||ph==='telophaseI') return new THREE.Vector3(px+so, py, 0);
+      if(ph==='meiosisII'){ var sp=c.sister?0.55:-0.55; return new THREE.Vector3(px+sp*0.5, py+sp, 0); }
+      var cx=(c.sister===0)?-2.0:2.0, cy=tp?POLE:-POLE, offs=(c.pair===1)?-0.3:0.3;
+      if(ph==='nondisjunction' && c.pair===2) offs=(c.parent==='M')?0.1:0.5;
+      if(ph==='fertilization'){ return new THREE.Vector3(-0.7+(c.pair===1?0:0.45), 0.3, 0); }
+      return new THREE.Vector3(cx+offs, cy, 0);
+    }
+    function chromVisible(c){
+      var mode=self._mode, ph=self._phase;
+      if(mode==='mitosis' && ph==='g1' && c.sister===1) return false;
+      if(ph==='fertilization') return c.sister===0 && topPole(c);   /* only the top-left gamete's set takes part */
+      return true;
+    }
+
+    /* ---------- the model's own control: mode toggle ---------- */
+    var modeBtn=K.button('divisionMode','btn ghost','Mode: mitosis');
+    modeBtn.onclick=function(){ setPhase(self._mode==='mitosis'?'meiosis':'mitosis', self._mode==='mitosis'?'interphase':'g1'); };
+
+    self._parts={CHROM:CHROM, PARTNER:PARTNER, SISTER_PAIRS:SISTER_PAIRS, connectors:connectors, fibers:fibers, stretch:stretch, target:target, chromVisible:chromVisible, topPole:topPole,
+      daughters:daughters, gametes:gametes, aneu:aneu, envelope:envelope, zygote:zygote, plate:plate, plantWall:plantWall, cellPlate:cellPlate, tumorCells:tumorCells, marker:marker, PHASE_ANGLE:PHASE_ANGLE,
+      MCOLOR:MCOLOR, PCOLOR:PCOLOR, POLE:POLE, lastKey:null, fromPos:[], toPos:[], pFrom:[], pTo:[], transStart:0, cellLerp:0};
+  },
+  onPick:function(info){ return this._K.onPick(info); },
+  onReset:function(){ this._K.onReset(); },
+
+  tick:function(t){
+    var self=this, P=self._parts; if(!P) return;
+    var f=self._K.tick(t), dt=f.dt;
+    /* phases are one-shot settles, not loops, so they run on wall time and keep moving during a quiz */
+    if(self._phaseStart===null) self._phaseStart=t-(self._phaseOffset||0);
+    var lt=t-self._phaseStart, mode=self._mode, ph=self._phase, CHROM=P.CHROM;
+    function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+    var key=mode+'|'+ph+'|'+self._cyto+'|'+self._orient.join('');
+
+    /* chromatids: lerp from the last settled pose to this phase's pose */
+    if(P.lastKey!==key){
+      P.lastKey=key; P.transStart=t;
+      P.fromPos=CHROM.map(function(c){ return c.mesh.position.clone(); });
+      P.toPos=CHROM.map(function(c){ return P.target(c); });
+      P.pFrom=P.PARTNER.map(function(c){ return c.mesh.position.clone(); });
+      P.pTo=P.PARTNER.map(function(c){ return ph==='fertilization' ? new THREE.Vector3(0.7-(c.pair===1?0:0.45),0.3,0) : new THREE.Vector3(6,0.3,0); });
+    }
+    var tt=clamp((t-P.transStart)/1.1,0,1);
+    CHROM.forEach(function(c,i){ c.mesh.position.lerpVectors(P.fromPos[i],P.toPos[i],tt); c.mesh.visible=P.chromVisible(c); });
+    P.PARTNER.forEach(function(c,i){ c.mesh.position.lerpVectors(P.pFrom[i],P.pTo[i],tt); c.mesh.visible = ph==='fertilization'; });
+
+    /* crossing over colors from prophase I onward in meiosis */
+    var crossed = mode==='meiosis' && ['prophaseI','metaphaseI','anaphaseI','telophaseI','meiosisII','result','fertilization','nondisjunction'].indexOf(ph)>=0;
+    CHROM.forEach(function(c){ var col=c.color; if(crossed && c.pair===1 && c.sister===0) col=(c.parent==='M')?P.PCOLOR:P.MCOLOR; c.mesh.userData.upper.material.color.setHex(col); });
+
+    /* centromere connectors while sisters are joined */
+    var joined = mode==='mitosis' ? ['s','prophase','metaphase'].indexOf(ph)>=0 : ['interphase','prophaseI','metaphaseI','anaphaseI','telophaseI'].indexOf(ph)>=0;
+    P.SISTER_PAIRS.forEach(function(pr,idx){
+      var cm=P.connectors[idx], c0=CHROM[pr[0]], c1=CHROM[pr[1]];
+      if(joined && c0.mesh.visible && c1.mesh.visible){ cm.position.lerpVectors(c0.mesh.position,c1.mesh.position,0.5); cm.visible=true; } else cm.visible=false;
     });
 
     /* spindle fibers */
     CHROM.forEach(function(c,idx){
-      var pole=div.poleFor(mode,step,c);
-      var fm=div.fibers[idx];
-      if(pole) div.stretchSegment(fm, pole, c.mesh.position);
-      else fm.visible=false;
+      var fm=P.fibers[idx], pole=null, up=P.topPole(c);
+      if(mode==='mitosis' && (ph==='prophase'||ph==='metaphase'||ph==='anaphase')) pole=new THREE.Vector3(0, up?3.4:-3.4, 0);
+      if(mode==='meiosis' && (ph==='metaphaseI'||ph==='anaphaseI')) pole=new THREE.Vector3(0, up?3.4:-3.4, 0);
+      if(mode==='meiosis' && ph==='meiosisII') pole=new THREE.Vector3(0, (up?P.POLE:-P.POLE)+(c.sister?1.1:-1.1), 0);
+      if(pole && c.mesh.visible) P.stretch(fm, pole, c.mesh.position); else fm.visible=false;
     });
 
-    /* daughter cell outlines */
-    div.outlines.forEach(function(o){ o.visible=false; });
-    if(mode==='mitosis' && step===3){
-      div.outlines[0].scale.setScalar(1); div.outlines[0].position.set(0,2.6,0); div.outlines[0].visible=true;
-      div.outlines[1].scale.setScalar(1); div.outlines[1].position.set(0,-2.6,0); div.outlines[1].visible=true;
-    } else if(mode==='meiosis' && step===3){
-      div.outlines[0].scale.setScalar(1); div.outlines[0].position.set(0,2.6,0); div.outlines[0].visible=true;
-      div.outlines[1].scale.setScalar(1); div.outlines[1].position.set(0,-2.6,0); div.outlines[1].visible=true;
-    } else if(mode==='meiosis' && step===4){
-      var corners=[[-2.0,2.6],[2.0,2.6],[-2.0,-2.6],[2.0,-2.6]];
-      corners.forEach(function(p,idx){
-        div.outlines[idx].scale.setScalar(0.75);
-        div.outlines[idx].position.set(p[0],p[1],0);
-        div.outlines[idx].visible=true;
-      });
-    }
+    /* shells: envelope, plate, daughters, gametes, zygote, plant wall, cell plate, tumor */
+    var e=1-Math.exp(-dt*3);
+    P.envelope.visible = (mode==='mitosis' && (ph==='g1'||ph==='s')) || (mode==='meiosis' && ph==='interphase');
+    P.plate.visible = (mode==='mitosis' && ph==='metaphase') || (mode==='meiosis' && ph==='metaphaseI');
+    var twoCells = mode==='mitosis' ? ['telophase','result','differentiation','cancer'].indexOf(ph)>=0 : ['telophaseI','meiosisII'].indexOf(ph)>=0;
+    var apart = ph==='telophase' || ph==='telophaseI' ? clamp(lt/1.3,0,1) : 1;
+    var plant = mode==='mitosis' && self._cyto==='plant' && ['telophase','result'].indexOf(ph)>=0;
+    P.daughters.forEach(function(s,i){
+      s.visible = twoCells && !plant;
+      var y=(i===0?1:-1)*(1.2+1.4*apart);
+      s.position.set(0,y,0);
+      var sc = ph==='differentiation' ? (i===0 ? [0.6,2.1,0.6] : [1.5,0.6,1.3]) : [1.6,1.6,1.6];
+      s.scale.x += (sc[0]-s.scale.x)*e; s.scale.y += (sc[1]-s.scale.y)*e; s.scale.z += (sc[2]-s.scale.z)*e;
+    });
+    P.plantWall.visible=plant;
+    P.cellPlate.visible=plant; if(plant){ var ps=ph==='telophase'?clamp(lt/1.5,0.02,1):1; P.cellPlate.scale.set(ps,1,ps); }
+    var four = mode==='meiosis' && (ph==='result'||ph==='nondisjunction');
+    var corners=[[-2.0,P.POLE],[2.0,P.POLE],[-2.0,-P.POLE],[2.0,-P.POLE]];
+    P.gametes.forEach(function(s,i){ s.visible = four && ph==='result'; s.position.set(corners[i][0],corners[i][1],0); s.scale.setScalar(1.15); });
+    P.aneu.forEach(function(s,i){ s.visible = four && ph==='nondisjunction'; s.position.set(corners[i][0],corners[i][1],0); s.scale.setScalar(1.15); });
+    if(ph==='fertilization'){
+      var fz=clamp(lt/1.4,0,1);
+      P.gametes[0].visible=true; P.gametes[0].position.set(-2.0+1.3*fz, P.POLE-(P.POLE-0.3)*fz, 0); P.gametes[0].scale.setScalar(1.15);
+      P.gametes[1].visible=true; P.gametes[1].position.set(2.0-1.3*fz, 0.3, 0); P.gametes[1].scale.setScalar(1.15);
+      P.zygote.visible=true; P.zygote.position.set(0,0.3,0); P.zygote.scale.setScalar(clamp((lt-1.0)/0.8,0.05,1));
+    } else P.zygote.visible=false;
+    P.tumorCells.forEach(function(c,i){ c.visible = ph==='cancer' && lt>0.4+i*0.35; });
+
+    /* cycle wheel marker */
+    var frac = mode==='mitosis' ? P.PHASE_ANGLE[ph] : (ph==='interphase'?0.22:0.93);
+    var an=Math.PI/2-frac*Math.PI*2;
+    P.marker.position.set(Math.cos(an)*1.6, Math.sin(an)*1.6, 0.2);
   }
 });
 
