@@ -313,13 +313,155 @@ function segment(p1, p2, r, hex){
 }
 
 /* ============================================================
+   TEACHING KIT — shared by the models. A registry of clickable
+   structures, a pulsing highlight, camera focus, a narrated Tour and
+   a click-the-structure Quiz, with Tour/Quiz buttons in #bar.
+
+   In build():   var K = teachKit(this, {id, radius, stops, quiz, onTourEnd});
+                 K.register(key, obj, info, passThrough) for every structure
+   In tick():    var f = K.tick(t);   // f.dt, f.at (clock frozen during a quiz), f.paused
+   The model's onPick / onReset delegate to K.onPick / K.onReset.
+   Stops: {tag, title, body, focus:key|null, r, keys:[...], enter()}
+   Quiz items: {q, keys:[...], ok, hint, when()}
+   ============================================================ */
+function teachKit(self, cfg){
+  var K = {
+    reg:{}, glow:[], focusObj:null, focusPt:null, focusR:null, sel:null,
+    stop:-1, quiz:null, animT:0, lastT:undefined, tmp:new THREE.Vector3(), stopPanel:null,
+    stops:cfg.stops||[], quizItems:cfg.quiz||[]
+  };
+  K.register = function(key, obj, info, passThrough){
+    info.key=key; obj.userData.info=info;
+    obj.traverse(function(o){ if(o.isMesh){ PICKABLE.push(o); if(passThrough) o.userData.passThrough=true; } });
+    (K.reg[key]=K.reg[key]||[]).push(obj);
+    return obj;
+  };
+  K.highlight = function(keys){
+    K.glow.forEach(function(m){ m.material.emissive.setHex(0x000000); m.material.emissiveIntensity=1; });
+    K.glow=[];
+    keys.forEach(function(k){ (K.reg[k]||[]).forEach(function(obj){ obj.traverse(function(o){
+      if(o.isMesh && o.material && o.material.emissive){ o.material.emissive.setHex(0xFFE2EE); K.glow.push(o); }
+    }); }); });
+  };
+  K.focusKey = function(key, r){ K.focusObj=(K.reg[key]||[null])[0]; K.focusPt=null; if(r!==undefined) K.focusR=r; };
+  K.focusHome = function(r){ K.focusObj=null; K.focusPt=new THREE.Vector3(0,0,0); K.focusR=(r!==undefined?r:cfg.radius); };
+
+  /* ---------- tour ---------- */
+  K.applyStop = function(i){
+    K.stop=i; K.sel=null;
+    if(i<0){
+      K.highlight([]); K.focusHome(cfg.radius); K.stopPanel=null; hideInfo();
+      K.tourBtn.textContent='Tour ▶';
+      if(cfg.onTourEnd) cfg.onTourEnd();
+      return;
+    }
+    var st=K.stops[i];
+    if(st.enter) st.enter();
+    K.highlight(st.keys||(st.focus?[st.focus]:[]));
+    if(st.focus) K.focusKey(st.focus, st.r); else K.focusHome(st.r);
+    K.stopPanel={tag:'Tour '+(i+1)+'/'+K.stops.length+' · '+st.tag, title:st.title, body:st.body};
+    showInfo(K.stopPanel);
+    K.tourBtn.textContent='Tour '+(i+1)+'/'+K.stops.length+' ▶';
+  };
+
+  /* ---------- quiz ---------- */
+  K.startQuiz = function(){
+    var items=K.quizItems.filter(function(it){ return !it.when || it.when(); });
+    for(var k=items.length-1;k>0;k--){ var j=Math.floor(Math.random()*(k+1)); var tmp=items[k]; items[k]=items[j]; items[j]=tmp; }
+    items=items.slice(0,10);
+    K.quiz={items:items, idx:0, score:0, answered:false, nextAt:null};
+    K.focusObj=null; K.focusPt=null; K.sel=null; K.highlight([]);
+    K.showPrompt();
+  };
+  K.showPrompt = function(){
+    var qz=K.quiz, it=qz.items[qz.idx];
+    qz.answered=false; qz.nextAt=null; K.highlight([]);
+    if(it.enter) it.enter();
+    showInfo({tag:'Quiz '+(qz.idx+1)+'/'+qz.items.length+' · score '+qz.score, title:it.q,
+      body:'Click the structure in the 3D scene. Drag to rotate if you need a better view.'});
+    K.quizBtn.textContent='Skip ▶ ('+(qz.idx+1)+'/'+qz.items.length+')';
+  };
+  K.endQuiz = function(){
+    var qz=K.quiz, n=qz.items.length, sc=qz.score;
+    var msg = sc===n ? 'Perfect. You can find everything this level tests.'
+            : sc>=n*0.7 ? 'Solid. Take the Tour for the ones you missed, then try again.'
+            : 'Take the Tour — it walks through every one of these — then quiz again.';
+    showInfo({tag:'Quiz complete', title:sc+' / '+n+' correct', body:msg});
+    K.quiz=null; K.quizBtn.textContent='Quiz me'; K.highlight([]);
+  };
+  K.quizNext = function(){ var qz=K.quiz; qz.idx++; if(qz.idx>=qz.items.length) K.endQuiz(); else K.showPrompt(); };
+
+  /* ---------- picking ---------- */
+  K.onPick = function(info){
+    if(K.quiz){
+      var qz=K.quiz, it=qz.items[qz.idx];
+      if(!info || qz.answered) return false;
+      if(it.keys.indexOf(info.key)>=0){
+        qz.score++; qz.answered=true; qz.nextAt=performance.now()*0.001+3.2;
+        K.highlight([info.key]);
+        showInfo({tag:'Correct · '+(qz.idx+1)+'/'+qz.items.length+' · score '+qz.score, title:info.title, body:it.ok});
+      } else {
+        showInfo({tag:'Not quite · '+(qz.idx+1)+'/'+qz.items.length, title:'That is the '+info.title.toLowerCase(), body:it.hint+' Try again.'});
+      }
+      return false;
+    }
+    if(info){ K.sel=info.key; K.highlight([info.key]); K.focusKey(info.key); return true; }
+    /* an empty click during a tour stop brings the narrative back instead of hiding the panel */
+    if(K.stop>=0 && K.stopPanel){ K.sel=null; K.highlight(K.stops[K.stop].keys||[]); showInfo(K.stopPanel); return false; }
+    K.sel=null; K.highlight([]); K.focusObj=null;
+    return true;
+  };
+  K.onReset = function(){ K.sel=null; K.focusObj=null; K.focusPt=null; K.focusR=null; K.highlight([]); };
+
+  /* ---------- per-frame: camera focus, glow pulse, quiz auto-advance ---------- */
+  K.tick = function(t){
+    var dt = K.lastT===undefined ? 0 : Math.min(0.05, t-K.lastT); K.lastT=t;
+    if(!K.quiz) K.animT += dt;
+    var k=1-Math.exp(-dt*9), dest=null;
+    if(K.focusObj) dest=K.focusObj.getWorldPosition(K.tmp); else if(K.focusPt) dest=K.focusPt;
+    if(dest) orbit.target.lerp(dest, k);
+    if(K.focusR!==null && K.focusR!==undefined){
+      orbit.radius += (K.focusR-orbit.radius)*k;
+      if(Math.abs(K.focusR-orbit.radius)<0.05){ orbit.radius=K.focusR; K.focusR=null; }
+      orbit.apply();
+    } else if(dest) orbit.apply();
+    var glow=0.22+0.16*Math.sin(t*5);
+    for(var i=0;i<K.glow.length;i++) K.glow[i].material.emissiveIntensity=glow;
+    if(K.quiz && K.quiz.nextAt!==null && t>=K.quiz.nextAt) K.quizNext();
+    return {dt:dt, at:K.animT, paused:!!(K.focusObj||K.sel||K.quiz)};
+  };
+
+  /* ---------- bar buttons, created once and shown only while this model is active ---------- */
+  K.button = function(id, cls, text){
+    var b=document.getElementById(id);
+    if(!b){ b=document.createElement('button'); b.id=id; b.className=cls; document.getElementById('bar').insertBefore(b, document.getElementById('lvl')); }
+    b.setAttribute('data-model-ui', cfg.id); b.textContent=text; return b;
+  };
+  K.tourBtn=K.button(cfg.id+'Tour','btn','Tour ▶');
+  K.tourBtn.onclick=function(){
+    if(K.quiz){ K.quiz=null; K.quizBtn.textContent='Quiz me'; }
+    var n=K.stop+1; if(n>=K.stops.length) n=-1;
+    K.applyStop(n);
+  };
+  K.quizBtn=K.button(cfg.id+'Quiz','btn ghost','Quiz me');
+  K.quizBtn.onclick=function(){
+    if(K.quiz){ K.quizNext(); return; }
+    if(K.stop>=0){ K.stop=-1; K.tourBtn.textContent='Tour ▶'; K.stopPanel=null; if(cfg.onTourEnd) cfg.onTourEnd(); }
+    K.focusPt=null; K.focusObj=null;
+    K.startQuiz();
+  };
+  self._K=K;
+  return K;
+}
+
+/* ============================================================
    MODEL 1 — Cell Explorer (Levels 4 & 5)
    A bacterium (with a bacteriophage landing on it and a biofilm
    nearby) beside an animal cell that can be toggled to a plant cell.
-   Every structure is clickable and registered under a key; a Tour
-   button walks the Level 4-5 concepts stop by stop, and a Quiz
-   button asks the student to find structures in the scene.
-   Models 2-5 follow the same MODELS.push pattern.
+   Built on teachKit: every structure is registered under a key, a
+   Tour walks the Level 4-5 concepts, a Quiz asks the student to find
+   structures in the scene. This is the reference implementation;
+   Models 2-5 follow the same pattern.
    ============================================================ */
 var MODELS = [];
 
@@ -331,25 +473,13 @@ MODELS.push({
   radius:20,
   build:function(ctx){
     var g=ctx.group, self=this;
-    self._plant=false; self._stop=-1; self._quiz=null; self._glow=[];
-    self._focusObj=null; self._focusPt=null; self._focusR=null; self._sel=null;
-    self._tmp=new THREE.Vector3(); self._ang=0; self._lastT=undefined; self._animT=0;
-    var REG={}; self._reg=REG;
-
-    /* register a structure: info gets a key, every mesh becomes pickable,
-       shells flagged passThrough let clicks reach what is inside them */
-    function reg(key, obj, info, passThrough){
-      info.key=key; obj.userData.info=info;
-      obj.traverse(function(o){ if(o.isMesh){ PICKABLE.push(o); if(passThrough) o.userData.passThrough=true; } });
-      (REG[key]=REG[key]||[]).push(obj);
-      return obj;
-    }
+    self._plant=false; self._ang=0;
+    var UP=new THREE.Vector3(0,1,0), FWD=new THREE.Vector3(0,0,1);
     function helixTube(len, turns, rad, tubeR, hex){
       var pts=[];
       for(var i=0;i<=60;i++){ var u=i/60, a=u*turns*Math.PI*2; pts.push(new THREE.Vector3(u*len, rad*Math.cos(a), rad*Math.sin(a))); }
       return new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts),90,tubeR,8,false), mat(hex));
     }
-    var UP=new THREE.Vector3(0,1,0), FWD=new THREE.Vector3(0,0,1);
 
     /* ---------- info text ---------- */
     var INFO={
@@ -405,6 +535,70 @@ MODELS.push({
         body:'A large water-filled sac that stores nutrients and waste and presses outward on the wall — that turgor pressure is what keeps a plant upright.'}
     };
 
+    /* ---------- tour + quiz content ---------- */
+    var STOPS=[
+      {tag:'Overview', focus:null, r:20, keys:[], title:'Two kinds of cells',
+       body:'Left: a bacterium, a prokaryote. Right: one of your cells, a eukaryote. Both are alive — they grow, use energy, respond, reproduce, and keep order inside a membrane — but only one has a nucleus. Real scale is more extreme than drawn here: bacteria are about 1–10 µm across, your cells 10–100 µm.'},
+      {tag:'Eukaryote', focus:'nucleus', r:9, keys:['nucleus','nucleolus'], title:'The defining difference: a nucleus',
+       body:'A double membrane perforated by pores keeps the linear chromosomes in one compartment. Inside it, the dense nucleolus assembles ribosome subunits. Nothing like this exists in the bacterium — “eukaryote” literally means “true nucleus.”'},
+      {tag:'Prokaryote', focus:'nucleoid', r:10, keys:['nucleoid','plasmid'], title:'DNA with no nucleus',
+       body:'The bacterium keeps one circular chromosome loose in its cytoplasm — the nucleoid region, with no membrane around it. The small rings are plasmids: extra DNA circles that can carry antibiotic-resistance genes from one bacterium to another.'},
+      {tag:'Both cell types', focus:null, r:20, keys:['ribosome'], title:'Ribosomes: in every cell alive',
+       body:'Every glowing dot is a ribosome, and both cells are full of them, because every cell builds protein. They are the structure prokaryotes and eukaryotes share. Bacterial ribosomes are a little smaller — a difference antibiotics like tetracycline exploit without harming yours.'},
+      {tag:'Prokaryote', focus:'wall-pg', r:11, keys:['wall-pg','pili'], title:'The wall antibiotics attack',
+       body:'Outside the bacterial membrane is a rigid peptidoglycan wall. Your cells have no wall, so penicillin — which blocks the enzyme that cross-links peptidoglycan — bursts bacteria and leaves you alone. The fine hairs are pili, used to grip host tissue: adhesion is how most infections begin.'},
+      {tag:'Eukaryote', focus:'golgi', r:9, keys:['rough-er','golgi','vesicle'], title:'The protein export line',
+       body:'Follow the moving vesicle. Ribosomes on the rough ER build the protein; the Golgi modifies, sorts, and packages it; a vesicle carries it to the membrane and releases it by exocytosis. The bare tube beside the rough ER is smooth ER — no ribosomes, it makes lipids and detoxifies drugs.'},
+      {tag:'Eukaryote', focus:'lysosome', r:9, keys:['lysosome','phagosome'], title:'Compartments, and swallowing a bacterium',
+       body:'A lysosome holds digestive enzymes that work at pH 5 — sealed off, because loose in the cytoplasm they would digest the cell. That is the advantage of compartments: incompatible reactions run side by side. Watch the lysosome fuse with a bacterium the cell has just engulfed by phagocytosis.'},
+      {tag:'Eukaryote', focus:'mito', r:7, keys:['mito'], title:'Mitochondria: former bacteria',
+       body:'Two membranes, the inner one folded into cristae — more surface for the electron transport chain that makes ATP. Look inside: a circular DNA ring and small ribosomes, just like the bacterium on the left. Mitochondria even divide by fission. That is the evidence for endosymbiosis.'},
+      {tag:'Prokaryote', focus:'fission', r:9, keys:['fission','biofilm'], title:'How bacteria spread and resist',
+       body:'The cell at the edge is dividing by binary fission — copy the chromosome, pinch in two, no mitosis. Bacteria cause disease by multiplying this fast, damaging tissue, and releasing toxins (not by inserting DNA into your nucleus — that is a virus trick). Stuck to a surface in a slimy biofilm, they also shrug off antibiotics.'},
+      {tag:'Not a cell', focus:'virus', r:7, keys:['virus'], title:'A virus is not a cell',
+       body:'This bacteriophage is a protein coat around DNA — no cytoplasm, no ribosomes, no metabolism. It cannot reproduce until it injects its DNA into a host cell and hijacks the host’s ribosomes. Viruses evolve, but they fail the cell and metabolism tests for life.'},
+      {tag:'Plant cell', focus:'chloroplast', r:10, keys:['plant-wall','chloroplast','vacuole'], plant:true, title:'What a plant cell adds',
+       body:'Same eukaryotic plan, three additions: a rigid cellulose wall outside the membrane (absent from animal cells), chloroplasts that capture light in stacked thylakoids — with their own DNA, like mitochondria — and a large central vacuole whose pressure keeps the plant upright.'}
+    ];
+    STOPS.forEach(function(st){ st.enter=function(){ setPlant(!!st.plant); }; });
+    var inPlant=function(){ return self._plant; };
+    var QUIZ=[
+      {q:'Click the structure that eukaryotes have and prokaryotes lack — the one that encloses the DNA.', keys:['nucleus'],
+       ok:'The nucleus: a double membrane with pores around linear chromosomes. Prokaryotic DNA just sits in the cytoplasm.', hint:'It is the large compartment in the middle of the cell on the right.'},
+      {q:'Click something found in BOTH cell types — every living cell has these.', keys:['ribosome'],
+       ok:'Ribosomes. All cells build protein, so all cells have them; bacterial ones are just smaller.', hint:'Think of the small dots scattered through both cells.'},
+      {q:'Click the layer made of peptidoglycan — the one penicillin attacks.', keys:['wall-pg'],
+       ok:'The bacterial cell wall. Your cells have no wall, which is why penicillin spares them.', hint:'It is the outermost layer of the bacterium on the left.'},
+      {q:'Click the prokaryote’s chromosome.', keys:['nucleoid'],
+       ok:'One circular chromosome, loose in the cytoplasm with no envelope — the nucleoid.', hint:'Look for the large loop inside the bacterium.'},
+      {q:'Click the small DNA loop that can carry antibiotic resistance from one bacterium to another.', keys:['plasmid'],
+       ok:'A plasmid. Resistance genes ride on these and spread sideways between cells, even across species.', hint:'Small rings inside the bacterium, separate from the big chromosome.'},
+      {q:'Click where ribosome subunits are assembled.', keys:['nucleolus'],
+       ok:'The nucleolus, the dense body inside the nucleus.', hint:'It sits inside the nucleus of the cell on the right.'},
+      {q:'Click the organelle that modifies, sorts, and packages proteins for delivery.', keys:['golgi'],
+       ok:'The Golgi apparatus — the shipping department.', hint:'A stack of flattened discs near the edge of the animal cell.'},
+      {q:'Click the ER that is “rough” because it is studded with ribosomes.', keys:['rough-er'],
+       ok:'Rough ER. Proteins for export are built on its ribosomes and fold inside it.', hint:'The long curved tube with dots on it — click the tube itself, not a dot.'},
+      {q:'Click the organelle that makes lipids and detoxifies drugs and alcohol.', keys:['smooth-er'],
+       ok:'Smooth ER: no ribosomes, lots of lipid synthesis and detox. Liver cells are full of it.', hint:'A bare curved tube next to the rough ER, with no dots.'},
+      {q:'Click the organelle whose inner membrane is folded into cristae.', keys:['mito'],
+       ok:'A mitochondrion. Cristae pack in surface area for the electron transport chain.', hint:'The orange, bean-shaped organelles with discs inside.'},
+      {q:'Click the compartment that keeps pH-5 digestive enzymes away from the rest of the cell.', keys:['lysosome'],
+       ok:'The lysosome. Compartmentalization lets it digest without digesting the cell.', hint:'A purple sphere near the lower edge of the animal cell.'},
+      {q:'Click the thing in this scene that is NOT alive — no cells, no metabolism.', keys:['virus'],
+       ok:'The bacteriophage. Protein coat, nucleic acid, nothing else — it needs a host to reproduce.', hint:'Look on top of the bacterium for something with legs.'},
+      {q:'Click the protective community that shields bacteria from antibiotics.', keys:['biofilm','biofilm-cell'],
+       ok:'A biofilm: bacteria embedded in a secreted matrix on a surface.', hint:'Lower left, a slimy mound on a flat surface.'},
+      {q:'Click the cell that is dividing by binary fission.', keys:['fission'],
+       ok:'Binary fission — copy the chromosome, pinch in two. No spindle, no mitosis.', hint:'In the biofilm, one cell keeps stretching and splitting.'},
+      {q:'Click the structure that gives a plant cell its rigid shape.', keys:['plant-wall'], when:inPlant,
+       ok:'The cellulose cell wall — outside the membrane, absent from animal cells.', hint:'The green box around the whole plant cell.'},
+      {q:'Click the organelle with its own DNA that captures light energy.', keys:['chloroplast'], when:inPlant,
+       ok:'A chloroplast: stacked thylakoids, double membrane, its own DNA — another endosymbiont.', hint:'Green ovals with dark discs inside, in the plant cell.'}
+    ];
+    var K=teachKit(self, {id:'cells', radius:20, stops:STOPS, quiz:QUIZ, onTourEnd:function(){ setPlant(false); }});
+    var reg=K.register;
+
     /* ============================================================
        PROKARYOTE (left)
        ============================================================ */
@@ -447,10 +641,9 @@ MODELS.push({
     var head=ball(0.34,0x9B5FE0,14); head.position.y=0.95; phage.add(head);
     var neck=rod(0.06,0.18,0xB98BFF); neck.position.y=0.62; phage.add(neck);
     var tailV=rod(0.075,0.55,0xB98BFF); tailV.position.y=0.27; phage.add(tailV);
-    var base=new THREE.Mesh(new THREE.CylinderGeometry(0.16,0.16,0.06,12), mat(0x6B4BA8)); phage.add(base);
+    phage.add(new THREE.Mesh(new THREE.CylinderGeometry(0.16,0.16,0.06,12), mat(0x6B4BA8)));
     for(var lg=0;lg<6;lg++){
-      var la=lg/6*Math.PI*2;
-      var leg=rod(0.022,0.42,0xB98BFF);
+      var la=lg/6*Math.PI*2, leg=rod(0.022,0.42,0xB98BFF);
       leg.position.set(Math.cos(la)*0.17, -0.12, Math.sin(la)*0.17);
       leg.quaternion.setFromUnitVectors(UP, new THREE.Vector3(Math.cos(la)*0.55, -1, Math.sin(la)*0.55).normalize());
       phage.add(leg);
@@ -481,22 +674,19 @@ MODELS.push({
     var emem=ball(5.2,0x2FB8A0,40,{opacity:0.20,side:THREE.DoubleSide}); euk.add(emem);
     reg('membrane-euk', emem, INFO['membrane-euk'], true);
 
-    /* nucleus: translucent envelope with pores, chromatin tangle, nucleolus */
     var nuc=new THREE.Group(); euk.add(nuc);
     var env=ball(1.9,0x6B4BA8,32,{opacity:0.42,side:THREE.DoubleSide}); nuc.add(env);
-    var chromatin=new THREE.Mesh(new THREE.TorusKnotGeometry(0.85,0.09,120,8,3,4), mat(0x9B5FE0)); nuc.add(chromatin);
+    nuc.add(new THREE.Mesh(new THREE.TorusKnotGeometry(0.85,0.09,120,8,3,4), mat(0x9B5FE0)));
     for(var po=0;po<8;po++){
       var pd=new THREE.Vector3(Math.sin(po*1.7)*0.9, Math.cos(po*2.3), Math.sin(po*0.9+1)*0.8).normalize();
       var pore=new THREE.Mesh(new THREE.TorusGeometry(0.17,0.045,6,14), mat(0xEFE9F7));
-      pore.position.copy(pd).multiplyScalar(1.9);
-      pore.quaternion.setFromUnitVectors(FWD, pd);
+      pore.position.copy(pd).multiplyScalar(1.9); pore.quaternion.setFromUnitVectors(FWD, pd);
       nuc.add(pore);
     }
     reg('nucleus', nuc, INFO.nucleus); env.userData.passThrough=true;
     var nucl=ball(0.55,0xE0417B,20); nucl.position.set(0.65,0.35,0.45); euk.add(nucl);
     reg('nucleolus', nucl, INFO.nucleolus);
 
-    /* mitochondria with cristae, their own DNA and ribosomes */
     function mitochondrion(){
       var grp=new THREE.Group();
       grp.add(capsule(0.46,1.0,0xF0A73A,{opacity:0.38}));
@@ -513,7 +703,6 @@ MODELS.push({
       euk.add(mi); reg('mito', mi, INFO.mito);
     }
 
-    /* rough ER (studded) and smooth ER (bare) */
     var erRot=new THREE.Euler(1.2,0.4,0);
     var er=new THREE.Mesh(new THREE.TorusGeometry(2.9,0.20,10,60,Math.PI*1.35), mat(0x8FA8E8));
     er.rotation.copy(erRot); euk.add(er); reg('rough-er', er, INFO['rough-er']);
@@ -578,225 +767,31 @@ MODELS.push({
       plant.add(ch); reg('chloroplast', ch, INFO.chloroplast);
     });
 
-    self._parts={pro:pro, euk:euk, flag:flag, emem:emem, plant:plant, vesicle:vesicle, vP0:vP0, vP1:vP1, vP2:vP2,
-      lyso:lyso, lysoHome:lysoHome, phBac:phBac, phVes:phVes, phA:phA, phB:phB, phC:phC, fisA:fisA, fisB:fisB, phage:phage};
-
-    /* ---------- selection highlight / plant toggle ---------- */
-    function highlight(keys){
-      self._glow.forEach(function(mm){ mm.material.emissive.setHex(0x000000); mm.material.emissiveIntensity=1; });
-      self._glow=[];
-      keys.forEach(function(k){ (REG[k]||[]).forEach(function(obj){ obj.traverse(function(o){
-        if(o.isMesh && o.material && o.material.emissive){ o.material.emissive.setHex(0xFFE2EE); self._glow.push(o); }
-      }); }); });
-    }
+    /* ---------- the model's own control: animal / plant ---------- */
+    var plantBtn=K.button('cellPlant','btn ghost','Switch to plant cell');
     function setPlant(on){
       self._plant=on; plant.visible=on; emem.visible=!on;
       plantBtn.textContent = on ? 'Switch to animal cell' : 'Switch to plant cell';
     }
-    self._highlight=highlight; self._setPlant=setPlant;
-
-    /* ---------- guided tour ---------- */
-    var STOPS=[
-      {tag:'Overview', focus:null, r:20, keys:[], title:'Two kinds of cells',
-       body:'Left: a bacterium, a prokaryote. Right: one of your cells, a eukaryote. Both are alive — they grow, use energy, respond, reproduce, and keep order inside a membrane — but only one has a nucleus. Real scale is more extreme than drawn here: bacteria are about 1–10 µm across, your cells 10–100 µm.'},
-      {tag:'Eukaryote', focus:'nucleus', r:9, keys:['nucleus','nucleolus'], title:'The defining difference: a nucleus',
-       body:'A double membrane perforated by pores keeps the linear chromosomes in one compartment. Inside it, the dense nucleolus assembles ribosome subunits. Nothing like this exists in the bacterium — “eukaryote” literally means “true nucleus.”'},
-      {tag:'Prokaryote', focus:'nucleoid', r:10, keys:['nucleoid','plasmid'], title:'DNA with no nucleus',
-       body:'The bacterium keeps one circular chromosome loose in its cytoplasm — the nucleoid region, with no membrane around it. The small rings are plasmids: extra DNA circles that can carry antibiotic-resistance genes from one bacterium to another.'},
-      {tag:'Both cell types', focus:null, r:20, keys:['ribosome'], title:'Ribosomes: in every cell alive',
-       body:'Every glowing dot is a ribosome, and both cells are full of them, because every cell builds protein. They are the structure prokaryotes and eukaryotes share. Bacterial ribosomes are a little smaller — a difference antibiotics like tetracycline exploit without harming yours.'},
-      {tag:'Prokaryote', focus:'wall-pg', r:11, keys:['wall-pg','pili'], title:'The wall antibiotics attack',
-       body:'Outside the bacterial membrane is a rigid peptidoglycan wall. Your cells have no wall, so penicillin — which blocks the enzyme that cross-links peptidoglycan — bursts bacteria and leaves you alone. The fine hairs are pili, used to grip host tissue: adhesion is how most infections begin.'},
-      {tag:'Eukaryote', focus:'golgi', r:9, keys:['rough-er','golgi','vesicle'], title:'The protein export line',
-       body:'Follow the moving vesicle. Ribosomes on the rough ER build the protein; the Golgi modifies, sorts, and packages it; a vesicle carries it to the membrane and releases it by exocytosis. The bare tube beside the rough ER is smooth ER — no ribosomes, it makes lipids and detoxifies drugs.'},
-      {tag:'Eukaryote', focus:'lysosome', r:9, keys:['lysosome','phagosome'], title:'Compartments, and swallowing a bacterium',
-       body:'A lysosome holds digestive enzymes that work at pH 5 — sealed off, because loose in the cytoplasm they would digest the cell. That is the advantage of compartments: incompatible reactions run side by side. Watch the lysosome fuse with a bacterium the cell has just engulfed by phagocytosis.'},
-      {tag:'Eukaryote', focus:'mito', r:7, keys:['mito'], title:'Mitochondria: former bacteria',
-       body:'Two membranes, the inner one folded into cristae — more surface for the electron transport chain that makes ATP. Look inside: a circular DNA ring and small ribosomes, just like the bacterium on the left. Mitochondria even divide by fission. That is the evidence for endosymbiosis.'},
-      {tag:'Prokaryote', focus:'fission', r:9, keys:['fission','biofilm'], title:'How bacteria spread and resist',
-       body:'The cell at the edge is dividing by binary fission — copy the chromosome, pinch in two, no mitosis. Bacteria cause disease by multiplying this fast, damaging tissue, and releasing toxins (not by inserting DNA into your nucleus — that is a virus trick). Stuck to a surface in a slimy biofilm, they also shrug off antibiotics.'},
-      {tag:'Not a cell', focus:'virus', r:7, keys:['virus'], title:'A virus is not a cell',
-       body:'This bacteriophage is a protein coat around DNA — no cytoplasm, no ribosomes, no metabolism. It cannot reproduce until it injects its DNA into a host cell and hijacks the host’s ribosomes. Viruses evolve, but they fail the cell and metabolism tests for life.'},
-      {tag:'Plant cell', focus:'chloroplast', r:10, keys:['plant-wall','chloroplast','vacuole'], plant:true, title:'What a plant cell adds',
-       body:'Same eukaryotic plan, three additions: a rigid cellulose wall outside the membrane (absent from animal cells), chloroplasts that capture light in stacked thylakoids — with their own DNA, like mitochondria — and a large central vacuole whose pressure keeps the plant upright.'}
-    ];
-    self._STOPS=STOPS;
-    function applyStop(i){
-      self._stop=i;
-      if(i<0){
-        highlight([]); self._focusObj=null; self._focusPt=new THREE.Vector3(0,0,0); self._focusR=20; self._sel=null;
-        setPlant(false); hideInfo(); tourBtn.textContent='Tour ▶'; return;
-      }
-      var st=STOPS[i];
-      setPlant(!!st.plant);
-      highlight(st.keys);
-      self._sel=null;
-      if(st.focus){ self._focusObj=REG[st.focus][0]; self._focusPt=null; }
-      else { self._focusObj=null; self._focusPt=new THREE.Vector3(0,0,0); }
-      self._focusR=st.r;
-      self._stopPanel={tag:'Tour '+(i+1)+'/'+STOPS.length+' · '+st.tag, title:st.title, body:st.body};
-      showInfo(self._stopPanel);
-      tourBtn.textContent='Tour '+(i+1)+'/'+STOPS.length+' ▶';
-    }
-    self._applyStop=applyStop;
-
-    /* ---------- quiz ---------- */
-    var QUIZ=[
-      {q:'Click the structure that eukaryotes have and prokaryotes lack — the one that encloses the DNA.', keys:['nucleus'],
-       ok:'The nucleus: a double membrane with pores around linear chromosomes. Prokaryotic DNA just sits in the cytoplasm.', hint:'It is the large compartment in the middle of the cell on the right.'},
-      {q:'Click something found in BOTH cell types — every living cell has these.', keys:['ribosome'],
-       ok:'Ribosomes. All cells build protein, so all cells have them; bacterial ones are just smaller.', hint:'Think of the small dots scattered through both cells.'},
-      {q:'Click the layer made of peptidoglycan — the one penicillin attacks.', keys:['wall-pg'],
-       ok:'The bacterial cell wall. Your cells have no wall, which is why penicillin spares them.', hint:'It is the outermost layer of the bacterium on the left.'},
-      {q:'Click the prokaryote’s chromosome.', keys:['nucleoid'],
-       ok:'One circular chromosome, loose in the cytoplasm with no envelope — the nucleoid.', hint:'Look for the large loop inside the bacterium.'},
-      {q:'Click the small DNA loop that can carry antibiotic resistance from one bacterium to another.', keys:['plasmid'],
-       ok:'A plasmid. Resistance genes ride on these and spread sideways between cells, even across species.', hint:'Small rings inside the bacterium, separate from the big chromosome.'},
-      {q:'Click where ribosome subunits are assembled.', keys:['nucleolus'],
-       ok:'The nucleolus, the dense body inside the nucleus.', hint:'It sits inside the nucleus of the cell on the right.'},
-      {q:'Click the organelle that modifies, sorts, and packages proteins for delivery.', keys:['golgi'],
-       ok:'The Golgi apparatus — the shipping department.', hint:'A stack of flattened discs near the edge of the animal cell.'},
-      {q:'Click the ER that is “rough” because it is studded with ribosomes.', keys:['rough-er'],
-       ok:'Rough ER. Proteins for export are built on its ribosomes and fold inside it.', hint:'The long curved tube with dots on it — click the tube itself, not a dot.'},
-      {q:'Click the organelle that makes lipids and detoxifies drugs and alcohol.', keys:['smooth-er'],
-       ok:'Smooth ER: no ribosomes, lots of lipid synthesis and detox. Liver cells are full of it.', hint:'A bare curved tube next to the rough ER, with no dots.'},
-      {q:'Click the organelle whose inner membrane is folded into cristae.', keys:['mito'],
-       ok:'A mitochondrion. Cristae pack in surface area for the electron transport chain.', hint:'The orange, bean-shaped organelles with discs inside.'},
-      {q:'Click the compartment that keeps pH-5 digestive enzymes away from the rest of the cell.', keys:['lysosome'],
-       ok:'The lysosome. Compartmentalization lets it digest without digesting the cell.', hint:'A purple sphere near the lower edge of the animal cell — it moves when it fuses with a phagosome.'},
-      {q:'Click the thing in this scene that is NOT alive — no cells, no metabolism.', keys:['virus'],
-       ok:'The bacteriophage. Protein coat, nucleic acid, nothing else — it needs a host to reproduce.', hint:'Look on top of the bacterium for something with legs.'},
-      {q:'Click the protective community that shields bacteria from antibiotics.', keys:['biofilm','biofilm-cell'],
-       ok:'A biofilm: bacteria embedded in a secreted matrix on a surface.', hint:'Lower left, a slimy mound on a flat surface.'},
-      {q:'Click the cell that is dividing by binary fission.', keys:['fission'],
-       ok:'Binary fission — copy the chromosome, pinch in two. No spindle, no mitosis.', hint:'In the biofilm, one cell keeps stretching and splitting.'},
-      {q:'Click the structure that gives a plant cell its rigid shape.', keys:['plant-wall'], plant:true,
-       ok:'The cellulose cell wall — outside the membrane, absent from animal cells.', hint:'The green box around the whole plant cell.'},
-      {q:'Click the organelle with its own DNA that captures light energy.', keys:['chloroplast'], plant:true,
-       ok:'A chloroplast: stacked thylakoids, double membrane, its own DNA — another endosymbiont.', hint:'Green ovals with dark discs inside, in the plant cell.'}
-    ];
-    function startQuiz(){
-      var items=QUIZ.filter(function(it){ return !it.plant || self._plant; }).slice();
-      for(var k=items.length-1;k>0;k--){ var j=Math.floor(Math.random()*(k+1)); var tmp=items[k]; items[k]=items[j]; items[j]=tmp; }
-      items=items.slice(0,10);
-      self._quiz={items:items, idx:0, score:0, answered:false, nextAt:null};
-      self._focusObj=null; self._sel=null; highlight([]);
-      showPrompt();
-    }
-    function showPrompt(){
-      var qz=self._quiz, it=qz.items[qz.idx];
-      qz.answered=false; qz.nextAt=null; highlight([]);
-      showInfo({tag:'Quiz '+(qz.idx+1)+'/'+qz.items.length+' · score '+qz.score, title:it.q, body:'Click the structure in the 3D scene. Drag to rotate if you need a better view.'});
-      quizBtn.textContent='Skip ▶ ('+(qz.idx+1)+'/'+qz.items.length+')';
-    }
-    function endQuiz(){
-      var qz=self._quiz, n=qz.items.length, sc=qz.score;
-      var msg = sc===n ? 'Perfect. You can find every structure Levels 4–5 test.'
-              : sc>=n*0.7 ? 'Solid. Take the Tour for the ones you missed, then try again.'
-              : 'Take the Tour — it walks through every one of these — then quiz again.';
-      showInfo({tag:'Quiz complete', title:sc+' / '+n+' correct', body:msg});
-      self._quiz=null; quizBtn.textContent='Quiz me'; highlight([]);
-    }
-    self._quizNext=function(){
-      var qz=self._quiz; qz.idx++;
-      if(qz.idx>=qz.items.length) endQuiz(); else showPrompt();
-    };
-
-    /* ---------- bar controls ---------- */
-    var tourBtn=document.getElementById('cellTour');
-    if(!tourBtn){
-      tourBtn=document.createElement('button'); tourBtn.id='cellTour'; tourBtn.className='btn';
-      document.getElementById('bar').insertBefore(tourBtn, document.getElementById('lvl'));
-    }
-    tourBtn.setAttribute('data-model-ui','cells'); tourBtn.textContent='Tour ▶';
-    tourBtn.onclick=function(){
-      if(self._quiz){ self._quiz=null; quizBtn.textContent='Quiz me'; }
-      var n=self._stop+1; if(n>=STOPS.length) n=-1;
-      applyStop(n);
-    };
-    var quizBtn=document.getElementById('cellQuiz');
-    if(!quizBtn){
-      quizBtn=document.createElement('button'); quizBtn.id='cellQuiz'; quizBtn.className='btn ghost';
-      document.getElementById('bar').insertBefore(quizBtn, document.getElementById('lvl'));
-    }
-    quizBtn.setAttribute('data-model-ui','cells'); quizBtn.textContent='Quiz me';
-    quizBtn.onclick=function(){
-      if(self._quiz){ self._quizNext(); return; }
-      if(self._stop>=0){ self._stop=-1; tourBtn.textContent='Tour ▶'; }
-      self._focusPt=null; self._focusObj=null;
-      startQuiz();
-    };
-    var plantBtn=document.getElementById('cellPlant');
-    if(!plantBtn){
-      plantBtn=document.createElement('button'); plantBtn.id='cellPlant'; plantBtn.className='btn ghost';
-      document.getElementById('bar').insertBefore(plantBtn, document.getElementById('lvl'));
-    }
-    plantBtn.setAttribute('data-model-ui','cells');
     plantBtn.onclick=function(){ setPlant(!self._plant); };
     setPlant(false);
-  },
 
-  /* a click in the scene: quiz answers, otherwise focus + highlight the structure */
-  onPick:function(info){
-    var self=this;
-    if(self._quiz){
-      var qz=self._quiz, it=qz.items[qz.idx];
-      if(!info || qz.answered) return false;
-      if(it.keys.indexOf(info.key)>=0){
-        qz.score++; qz.answered=true; qz.nextAt=performance.now()*0.001+3.2;
-        self._highlight([info.key]);
-        showInfo({tag:'Correct · '+(qz.idx+1)+'/'+qz.items.length+' · score '+qz.score, title:info.title, body:it.ok});
-      } else {
-        showInfo({tag:'Not quite · '+(qz.idx+1)+'/'+qz.items.length, title:'That is the '+info.title.toLowerCase(), body:it.hint+' Try again.'});
-      }
-      return false;
-    }
-    if(info){
-      self._sel=info.key; self._highlight([info.key]);
-      self._focusObj=(self._reg[info.key]||[null])[0]; self._focusPt=null;
-      return true;
-    }
-    /* empty click during a tour stop brings the stop's narrative back instead of hiding the panel */
-    if(self._stop>=0 && self._stopPanel){
-      self._sel=null; self._highlight(self._STOPS[self._stop].keys); showInfo(self._stopPanel); return false;
-    }
-    self._sel=null; self._highlight([]); self._focusObj=null;
-    return true;
+    self._parts={pro:pro, euk:euk, flag:flag, emem:emem, plant:plant, vesicle:vesicle, vP0:vP0, vP1:vP1, vP2:vP2,
+      lyso:lyso, lysoHome:lysoHome, phBac:phBac, phVes:phVes, phA:phA, phB:phB, phC:phC, fisA:fisA, fisB:fisB, phage:phage};
   },
-  onReset:function(){
-    this._sel=null; this._focusObj=null; this._focusPt=null; this._focusR=null;
-    if(this._highlight) this._highlight([]);
-  },
+  onPick:function(info){ return this._K.onPick(info); },
+  onReset:function(){ this._K.onReset(); },
 
   tick:function(t){
     var self=this, P=self._parts; if(!P) return;
-    var dt = self._lastT===undefined ? 0 : Math.min(0.05, t-self._lastT); self._lastT=t;
-    /* organelle animations run on their own clock, frozen during a quiz so targets hold still */
-    if(!self._quiz) self._animT += dt;
-    var at=self._animT, k=1-Math.exp(-dt*9);
+    var f=self._K.tick(t), at=f.at;
 
     /* the animal cell turns slowly unless something is being looked at */
-    var paused = !!(self._focusObj || self._sel || self._quiz);
-    if(!paused) self._ang += dt*0.055;
+    if(!f.paused) self._ang += f.dt*0.055;
     P.euk.rotation.y=self._ang;
     P.pro.rotation.y=Math.sin(t*0.16)*0.22;
     P.flag.rotation.x=t*10;
     P.phage.position.y=2.62+Math.sin(t*2)*0.04;
-
-    /* camera focus */
-    var dest=null;
-    if(self._focusObj) dest=self._focusObj.getWorldPosition(self._tmp);
-    else if(self._focusPt) dest=self._focusPt;
-    if(dest) orbit.target.lerp(dest, k);
-    if(self._focusR!==null && self._focusR!==undefined){
-      orbit.radius += (self._focusR-orbit.radius)*k;
-      if(Math.abs(self._focusR-orbit.radius)<0.05){ orbit.radius=self._focusR; self._focusR=null; }
-      orbit.apply();
-    } else if(dest) orbit.apply();
-
-    /* highlight pulse */
-    var glow=0.22+0.16*Math.sin(t*5);
-    for(var i=0;i<self._glow.length;i++) self._glow[i].material.emissiveIntensity=glow;
 
     /* secretory vesicle: ER -> Golgi (modified) -> membrane (fuses) */
     var ph=(at%7)/7, v=P.vesicle;
@@ -820,99 +815,178 @@ MODELS.push({
     else if(fp<0.55){ A.scale.y=2.1; B.visible=true; B.scale.y=0.9; B.position.x=0.25; A.position.x=-0.25; }
     else if(fp<0.9){ var s=(fp-0.55)/0.35; A.scale.y=2.1-1.1*s; A.position.x=-0.25-0.35*s; B.scale.y=0.9+0.1*s; B.position.x=0.25+0.35*s; }
     else { B.visible=false; A.scale.y=1; A.position.x=0; }
-
-    /* quiz: advance after a correct answer */
-    if(self._quiz && self._quiz.nextAt!==null && t>=self._quiz.nextAt) self._quizNext();
   }
 });
 
 /* ============================================================
    MODEL 2 — Membrane Transport (Level 6)
-   Bilayer cross-section with a channel, a carrier, a pump, and
-   cholesterol. Floating molecules show which of them cross
-   unaided and which need help — and at what cost.
+   A fluid-mosaic bilayer cross-section — lipids wobble, proteins
+   drift — with an ion channel, an aquaporin, a glucose carrier, the
+   sodium-potassium pump and cholesterol. Molecules show what crosses
+   unaided and what needs help. To the right, a beaker holds an animal
+   cell and a plant cell in a solution whose tonicity can be switched
+   (hypotonic / isotonic / hypertonic) to show osmosis, swelling,
+   shrinking, turgor and plasmolysis. Tour + Quiz via teachKit.
    ============================================================ */
 MODELS.push({
   id:'transport',
   name:'2 · Membrane Transport',
   level:'Level 6 · 3.1.9-12.B',
-  hint:'Drag to rotate · click a protein · toggle the gradient top-right',
-  radius:24,
+  hint:'Click anything to focus on it · Tour walks you through · Solution button changes tonicity',
+  radius:26,
   build:function(ctx){
-    var add=ctx.add, g=ctx.group, self=this;
-    self._mode = self._mode || 'down';
+    var g=ctx.group, self=this;
+    self._ton='iso';
 
-    var HEAD=0xF0A73A, TAIL=0xB98BFF, BOND=0xD9D2E6,
-        CHANNEL=0x8FA8E8, CARRIER=0xE87FB0, PUMP=0x9B5FE0,
-        CHOL=0x7BC47F, NA=0xE0417B, K=0x2FB8A0,
-        OATOM=0xEFE9F7, CATOM=0x5E5678;
+    var HEAD=0xF0A73A, TAIL=0xB98BFF, BOND=0xD9D2E6, CHANNEL=0x8FA8E8, AQUA=0x4A8FD9, CARRIER=0xE87FB0, PUMP=0x9B5FE0,
+        CHOL=0x7BC47F, NA=0xE0417B, K_=0x2FB8A0, OATOM=0xEFE9F7, CATOM=0x5E5678, WATER=0x4A8FD9, SOLUTE=0x6B4BA8;
+    var CH_X=-5.5, AQ_X=-2.2, CAR_X=1.2, PUMP_X=5.0;
 
-    var CH_X=-5, CAR_X=-1, PUMP_X=3.5;
+    var INFO={
+      'lipid-head':{tag:'Membrane', title:'Phospholipid heads',
+        body:'Phosphate heads are polar, so they face the water on both sides of the membrane. With the tails tucked between them, the sheet assembles itself — two molecules thick, no energy required.'},
+      'lipid-tail':{tag:'Membrane', title:'Hydrophobic core (fatty-acid tails)',
+        body:'Nonpolar tails packed away from water. This oily core is the actual barrier: small nonpolar molecules dissolve through it, but ions and large polar molecules such as glucose cannot. That is what selective permeability means.'},
+      'cholesterol':{tag:'Membrane', title:'Cholesterol',
+        body:'Wedged between the tails. When it is warm it holds the tails in line so the membrane does not get too fluid; when it is cold it keeps them from packing into a solid. A buffer that keeps fluidity steady across temperatures.'},
+      'channel':{tag:'Membrane protein', title:'Ion channel',
+        body:'A pore lined with charged amino acids. Na⁺ and K⁺ cross only here, down their concentration gradient, with no energy spent — facilitated diffusion through a channel.'},
+      'aquaporin':{tag:'Membrane protein', title:'Aquaporin (water channel)',
+        body:'Water is small but polar, so it crosses the oily core only slowly on its own. Aquaporins let billions of water molecules a second through — which is what makes osmosis fast enough to matter.'},
+      'carrier':{tag:'Membrane protein', title:'Glucose carrier (facilitated diffusion)',
+        body:'Binds glucose on one face, flexes, and releases it on the other — a path, not a push. Still passive: glucose only moves down its gradient. Watch the protein change shape as each glucose passes.'},
+      'pump':{tag:'Membrane protein', title:'Sodium–potassium pump (active transport)',
+        body:'Each cycle binds 3 Na⁺ inside, spends one ATP, flips, releases them outside, then carries 2 K⁺ in — both against their gradients. The unequal 3-out, 2-in exchange leaves the inside of the cell negative, which nerve impulses depend on.'},
+      'atp':{tag:'Energy', title:'ATP',
+        body:'The pump spends one ATP per cycle: ATP → ADP + phosphate (the small white piece that breaks away). Paying energy to move ions uphill is exactly what separates active transport from every passive kind.'},
+      'gas':{tag:'Simple diffusion', title:'O₂ / CO₂',
+        body:'Small and nonpolar, so they dissolve straight through the lipid core wherever they like — no protein needed. Simple diffusion, always down the concentration gradient.'},
+      'ion':{tag:'Needs a channel', title:'Na⁺ / K⁺ ion',
+        body:'Charged, with water molecules clinging to it, so it cannot enter the oily core — watch one bounce off. Ions cross only through a channel (passive) or a pump (active).'},
+      'glucose':{tag:'Needs a carrier', title:'Glucose',
+        body:'Large and polar, so the core blocks it. It crosses only through its carrier protein, and only down its gradient — facilitated diffusion.'},
+      'water':{tag:'Osmosis', title:'Water',
+        body:'Polar, so the core slows it, but small enough that some slips through — and aquaporins let it flood through. Its net movement across a membrane toward the side with more solute is osmosis.'},
+      'solution':{tag:'Tonicity', title:'The solution around the cells',
+        body:'Hypotonic: fewer solutes outside than inside, so water flows in. Hypertonic: more solutes outside, so water flows out. Isotonic: equal, no net flow. The membrane lets water through but not most solutes, so only water can move to even things out.'},
+      'solute':{tag:'Tonicity', title:'Solute particles',
+        body:'Dissolved salts and sugars. They cannot cross the membrane freely, so their concentration on each side decides which way water moves.'},
+      'animal-cell':{tag:'Tonicity', title:'Animal cell',
+        body:'No wall. In a hypotonic solution water rushes in and the cell swells — and can burst. In a hypertonic solution water leaves and it shrinks and crinkles. Your body keeps blood isotonic to avoid both.'},
+      'plant-cell':{tag:'Tonicity', title:'Plant cell',
+        body:'The wall resists swelling, so in a hypotonic solution the cell becomes turgid and firm — the healthy state that holds a plant upright. In a hypertonic solution water leaves and the membrane pulls away from the wall: plasmolysis, the wilting plant.'}
+    };
 
-    /* ---------- bilayer: two leaflets, heads out, tails in ---------- */
+    var STOPS=[
+      {tag:'Overview', focus:null, r:26, keys:['channel','aquaporin','carrier','pump'], title:'The fluid mosaic',
+       body:'A phospholipid bilayer two molecules thick, studded with proteins. “Fluid” because everything drifts sideways — watch the lipids wobble and the proteins slide. “Mosaic” because the proteins are many different kinds, each with its own job. Outside the cell is up; inside is down.'},
+      {tag:'Membrane', focus:'lipid-tail', r:12, keys:['lipid-tail','lipid-head'], title:'Selective permeability',
+       body:'Heads face the water, tails hide from it. The oily tail core is the barrier: anything charged or large and polar cannot dissolve through it. That is why a cell can keep its inside different from its outside — the membrane lets some things pass and refuses others.'},
+      {tag:'Passive', focus:'gas', r:11, keys:['gas'], title:'Simple diffusion',
+       body:'Follow an O₂ or CO₂. Small and nonpolar, they slip straight through the tails wherever they like, from where they are concentrated to where they are not. No protein, no energy — the gradient does the work.'},
+      {tag:'Passive', focus:'channel', r:11, keys:['channel','ion'], title:'Ions need a channel',
+       body:'Na⁺ and K⁺ bounce off the core everywhere — except at the channel, a protein pore lined with charged amino acids. Through it they move down their gradient, still for free. Facilitated diffusion: a protein provides the path, the gradient provides the push.'},
+      {tag:'Passive', focus:'carrier', r:10, keys:['carrier','glucose'], title:'Facilitated diffusion by a carrier',
+       body:'Glucose is too big and too polar for the core. The carrier binds it on one side, flexes, and lets go on the other — watch the protein change shape. Still no ATP: glucose only ever travels down its gradient. This is how glucose enters your cells.'},
+      {tag:'Osmosis', focus:'aquaporin', r:10, keys:['aquaporin','water'], title:'Osmosis: water across a membrane',
+       body:'Water is polar, so the core slows it, but aquaporin channels let it pour through. Its net direction is always toward the side with more solute — that is, less water. The diffusion of water across a selectively permeable membrane has its own name: osmosis.'},
+      {tag:'Tonicity', focus:'animal-cell', r:12, keys:['animal-cell','solution','solute'], ton:'hyper', title:'An animal cell in a hypertonic solution',
+       body:'More solute outside than in, so water leaves and the cell shrinks and crinkles. Switch the solution to hypotonic and it swells — with no wall to stop it, it can burst. Isotonic is the safe middle, which is why your blood is kept there.'},
+      {tag:'Tonicity', focus:'plant-cell', r:12, keys:['plant-cell','solution'], ton:'hypo', title:'A plant cell in a hypotonic solution',
+       body:'Water floods in here too, but the cellulose wall holds. The membrane presses firmly against it — turgid, the healthy state that keeps a plant upright. In a hypertonic solution the membrane pulls away from the wall instead: plasmolysis, and the plant wilts.'},
+      {tag:'Active', focus:'pump', r:10, keys:['pump','atp'], title:'Active transport costs ATP',
+       body:'Everything so far ran downhill for free. The sodium–potassium pump runs uphill: 3 Na⁺ out, 2 K⁺ in, both against their gradients, one ATP burned per cycle — watch the ATP flash and lose its phosphate. Three out for two in leaves the cell interior negative, the charge nerves fire with.'},
+      {tag:'Membrane', focus:'cholesterol', r:9, keys:['cholesterol'], title:'Cholesterol keeps fluidity steady',
+       body:'The green molecules wedged between the tails. Warm, they hold the tails in line so the membrane does not turn to liquid; cold, they stop the tails packing into a solid. A buffer against temperature — one more reason the mosaic stays fluid.'}
+    ];
+    STOPS.forEach(function(st){ st.enter=function(){ setTonicity(st.ton||'iso'); }; });
+    var QUIZ=[
+      {q:'Click a protein embedded in the membrane — the “mosaic” part of the fluid mosaic.', keys:['channel','aquaporin','carrier','pump'],
+       ok:'The membrane is a bilayer studded with many kinds of proteins, all free to drift.', hint:'Any of the large shapes set into the bilayer.'},
+      {q:'Click a molecule that crosses the bilayer on its own, with no protein helping.', keys:['gas'],
+       ok:'O₂ and CO₂: small and nonpolar, so they dissolve straight through the lipid core.', hint:'Look for the small white (or white-and-gray) pairs passing through the tails anywhere.'},
+      {q:'Click the molecule wedged between phospholipids that keeps fluidity steady when it is warm or cold.', keys:['cholesterol'],
+       ok:'Cholesterol: a buffer against temperature, holding the tails neither too loose nor too tight.', hint:'Small green pieces tucked between the tails.'},
+      {q:'Click the hydrophobic core that ions and large polar molecules cannot cross.', keys:['lipid-tail'],
+       ok:'The fatty-acid tails. Selective permeability comes from this oily layer.', hint:'The pale tails between the two rows of heads.'},
+      {q:'Click the channel that water uses in osmosis.', keys:['aquaporin'],
+       ok:'An aquaporin. Water crosses the core slowly on its own but floods through this channel.', hint:'The blue channel with water molecules streaming through it.'},
+      {q:'Click the protein that moves glucose down its gradient without using ATP.', keys:['carrier'],
+       ok:'The glucose carrier: facilitated diffusion, a path but not a push.', hint:'The pink protein that flexes as glucose passes.'},
+      {q:'Click the protein that uses ATP to move ions AGAINST their gradient.', keys:['pump'],
+       ok:'The sodium–potassium pump — active transport.', hint:'The large purple protein with ions cycling through it.'},
+      {q:'Click the energy source the sodium–potassium pump spends each cycle.', keys:['atp'],
+       ok:'ATP, which becomes ADP + phosphate each time the pump flips.', hint:'The small amber ball beside the pump that flashes.'},
+      {q:'Click an ion — the kind of particle that bounces off the lipid core unless a channel lets it through.', keys:['ion'],
+       ok:'Na⁺ or K⁺: charged, so the oily core turns it away.', hint:'The pink or teal spheres — some bounce off the membrane, some pass through the channel.'},
+      {q:'Click the molecule whose movement across a membrane is called osmosis.', keys:['water'],
+       ok:'Water — it moves toward the side with more solute.', hint:'Blue molecules with two tiny white hydrogens.'},
+      {q:'Click the cell that is shrinking because the solution around it is hypertonic.', keys:['animal-cell'], enter:function(){ setTonicity('hyper'); },
+       ok:'The animal cell. More solute outside pulls water out; with no wall, it shrivels.', hint:'In the beaker on the right — the cell with no wall.'},
+      {q:'Click the cell that is turgid and firm in a hypotonic solution.', keys:['plant-cell'], enter:function(){ setTonicity('hypo'); },
+       ok:'The plant cell. Water flows in, the wall holds, and the membrane presses firmly against it.', hint:'In the beaker on the right — the cell inside a square wall.'}
+    ];
+    var K=teachKit(self, {id:'transport', radius:26, stops:STOPS, quiz:QUIZ, onTourEnd:function(){ setTonicity('iso'); }});
+    var reg=K.register;
+
+    /* ============================================================
+       BILAYER
+       ============================================================ */
+    var heads=new THREE.Group(), tails=new THREE.Group(); g.add(heads, tails);
+    var lipids=[];
     function lipid(x,z,side){
-      var grp=new THREE.Group();
-      var head=ball(0.30,HEAD,14); head.position.set(0,side*1.3,0);
-      grp.add(head);
-      [-0.15,0.15].forEach(function(dx){
-        var tail=rod(0.085,1.15,TAIL);
-        tail.position.set(dx,side*0.62,0);
-        grp.add(tail);
-      });
-      grp.position.set(x,0,z);
-      return grp;
+      var h=ball(0.30,HEAD,14); h.position.set(x,side*1.3,z); heads.add(h);
+      var ts=[];
+      [-0.15,0.15].forEach(function(dx){ var t=rod(0.085,1.15,TAIL); t.position.set(x+dx,side*0.62,z); tails.add(t); ts.push(t); });
+      lipids.push({head:h, tails:ts, x:x, z:z, side:side, phase:Math.random()*6.3});
     }
-    var bilayer=new THREE.Group();
     for(var x=-7.6; x<=7.6; x+=0.8){
-      if(Math.abs(x-CH_X)<1.0 || Math.abs(x-CAR_X)<1.0 || Math.abs(x-PUMP_X)<1.5) continue;
+      if(Math.abs(x-CH_X)<1.3 || Math.abs(x-AQ_X)<1.05 || Math.abs(x-CAR_X)<1.1 || Math.abs(x-PUMP_X)<1.55) continue;
       var lz=(Math.random()-0.5)*0.3;
-      bilayer.add(lipid(x,lz,1));
-      bilayer.add(lipid(x,lz,-1));
+      lipid(x,lz,1); lipid(x,lz,-1);
     }
-    add(bilayer, {tag:'Membrane', title:'Phospholipid bilayer',
-      body:'Phosphate heads face the water on both sides; fatty-acid tails pack together in between, away from water. That hydrophobic core is the barrier — small nonpolar molecules slip through the tails, but ions and sugars cannot cross it unaided.'});
+    reg('lipid-head', heads, INFO['lipid-head']);
+    reg('lipid-tail', tails, INFO['lipid-tail']);
 
-    /* ---------- channel protein: an open pore ---------- */
+    [-7.2,-0.6,3.1,7.2].forEach(function(cx){
+      var chol=new THREE.Group();
+      var cb=rod(0.11,0.9,CHOL); chol.add(cb);
+      var ch=ball(0.16,CHOL,12); ch.position.y=0.5; chol.add(ch);
+      chol.position.set(cx,0.15,0.25);
+      g.add(chol); reg('cholesterol', chol, INFO.cholesterol);
+    });
+
+    /* ---------- proteins (each drifts sideways a little: fluid mosaic) ---------- */
     var chGroup=new THREE.Group();
     for(var ri=0; ri<5; ri++){
       var ring=new THREE.Mesh(new THREE.TorusGeometry(0.5,0.16,10,24), mat(CHANNEL));
-      ring.rotation.x=Math.PI/2; ring.position.y=(ri-2)*0.5;
-      chGroup.add(ring);
+      ring.rotation.x=Math.PI/2; ring.position.y=(ri-2)*0.5; chGroup.add(ring);
     }
     var chOut=ball(0.55,CHANNEL,18); chOut.position.y=1.4; chGroup.add(chOut);
     var chIn=ball(0.6,CHANNEL,18); chIn.position.y=-1.45; chGroup.add(chIn);
-    chGroup.position.set(CH_X,0,0);
-    add(chGroup, {tag:'Membrane protein', title:'Channel protein',
-      body:'A permanently open pore lined with polar and charged residues that lets one specific ion pass down its own concentration gradient. No energy is spent — this is facilitated diffusion, and it only runs one direction: with the gradient.'});
+    chGroup.position.set(CH_X,0,0); g.add(chGroup); reg('channel', chGroup, INFO.channel);
 
-    /* ---------- carrier protein: binds, flexes, releases ---------- */
+    var aqGroup=new THREE.Group();
+    var aqBody=rod(0.42,2.9,AQUA); aqGroup.add(aqBody);
+    var aqPore=rod(0.14,3.0,0x1C1530); aqGroup.add(aqPore);
+    var aqTop=new THREE.Mesh(new THREE.TorusGeometry(0.42,0.1,8,20), mat(AQUA)); aqTop.rotation.x=Math.PI/2; aqTop.position.y=1.45; aqGroup.add(aqTop);
+    var aqBot=aqTop.clone(); aqBot.position.y=-1.45; aqGroup.add(aqBot);
+    aqGroup.position.set(AQ_X,0,0); g.add(aqGroup); reg('aquaporin', aqGroup, INFO.aquaporin);
+
     var carGroup=new THREE.Group();
-    var carTrunk=capsule(0.45,2.5,CARRIER); carGroup.add(carTrunk);
+    carGroup.add(capsule(0.45,2.5,CARRIER));
     var pocket=ball(0.38,CARRIER,16); pocket.position.set(0,0.15,0.32); carGroup.add(pocket);
-    carGroup.position.set(CAR_X,0,0);
-    add(carGroup, {tag:'Membrane protein', title:'Carrier protein (facilitated diffusion)',
-      body:'Binds glucose on one face, flexes through a conformational change, and releases it on the other — never opening a straight-through channel. Still passive: glucose only moves from high concentration to low, and the carrier just makes a crossing that would otherwise be too slow fast enough to matter.'});
+    carGroup.position.set(CAR_X,0,0); g.add(carGroup); reg('carrier', carGroup, INFO.carrier);
 
-    /* ---------- sodium-potassium pump ---------- */
     var pumpGroup=new THREE.Group();
-    var pTrunk=rod(0.55,3.0,PUMP); pumpGroup.add(pTrunk);
+    pumpGroup.add(rod(0.55,3.0,PUMP));
     var pOut=ball(0.65,PUMP,18); pOut.position.y=1.15; pumpGroup.add(pOut);
     var pIn=ball(0.78,PUMP,18); pIn.position.y=-1.2; pumpGroup.add(pIn);
-    pumpGroup.position.set(PUMP_X,0,0);
-    add(pumpGroup, {tag:'Membrane protein', title:'Sodium–potassium pump',
-      body:'Binds 3 Na⁺ inside the cell; ATP hydrolysis (ATP → ADP + phosphate) flexes the pump to release them outside — against their own gradient, since Na⁺ is already more concentrated there. The same shift then binds 2 K⁺ outside and releases them inside. One ATP spent per cycle to move both ions the ‘wrong’ way.'});
+    pumpGroup.position.set(PUMP_X,0,0); g.add(pumpGroup); reg('pump', pumpGroup, INFO.pump);
 
-    /* ---------- cholesterol ---------- */
-    [-6.4, 0.6, 6.2].forEach(function(cx){
-      var chol=new THREE.Group();
-      var cbody=rod(0.11,0.9,CHOL); chol.add(cbody);
-      var chead=ball(0.16,CHOL,12); chead.position.y=0.5; chol.add(chead);
-      chol.position.set(cx, 0.15, 0.25);
-      add(chol, {tag:'Membrane component', title:'Cholesterol',
-        body:'Wedged between the fatty tails, cholesterol keeps the membrane fluid when it is cold (stopping the tails from packing too tightly) and stiffens it when it is warm — a buffer that holds fluidity roughly constant across a range of temperatures.'});
-    });
+    var PROTS=[{o:chGroup,x:CH_X,ph:0},{o:aqGroup,x:AQ_X,ph:1.7},{o:carGroup,x:CAR_X,ph:3.1},{o:pumpGroup,x:PUMP_X,ph:4.6}];
 
-    /* ---------- floating molecules (not clickable — see hint) ---------- */
+    /* ---------- molecules ---------- */
     function diatomic(hex,r,bond){
       var grp=new THREE.Group();
       var a=ball(r,hex,12); a.position.x=-bond/2; grp.add(a);
@@ -921,8 +995,7 @@ MODELS.push({
       return grp;
     }
     function co2mesh(){
-      var grp=new THREE.Group();
-      grp.add(ball(0.17,CATOM,12));
+      var grp=new THREE.Group(); grp.add(ball(0.17,CATOM,12));
       [-0.34,0.34].forEach(function(dx){
         var o=ball(0.18,OATOM,12); o.position.x=dx; grp.add(o);
         var rd=rod(0.05,0.34,BOND); rd.rotation.z=Math.PI/2; rd.position.x=dx/2; grp.add(rd);
@@ -932,93 +1005,144 @@ MODELS.push({
     function glucoseMesh(){
       var grp=new THREE.Group();
       grp.add(new THREE.Mesh(new THREE.TorusGeometry(0.26,0.09,10,20), mat(CARRIER)));
-      for(var oi=0; oi<3; oi++){
-        var oh=ball(0.09,OATOM,8); var oa=oi*2.1;
-        oh.position.set(Math.cos(oa)*0.34,Math.sin(oa)*0.34,0.12);
-        grp.add(oh);
-      }
+      for(var oi=0; oi<3; oi++){ var oh=ball(0.09,OATOM,8), oa=oi*2.1; oh.position.set(Math.cos(oa)*0.34,Math.sin(oa)*0.34,0.12); grp.add(oh); }
       return grp;
     }
-    function ion(hex,r){ return ball(r,hex,16); }
-
+    function waterMesh(){
+      var grp=new THREE.Group(); grp.add(ball(0.15,WATER,12));
+      [-0.13,0.13].forEach(function(dx){ var h=ball(0.075,OATOM,8); h.position.set(dx,0.12,0); grp.add(h); });
+      return grp;
+    }
     var movers=[];
-    function laneOK(lx){ return Math.abs(lx-CH_X)>1.1 && Math.abs(lx-CAR_X)>1.1 && Math.abs(lx-PUMP_X)>1.6; }
+    function laneOK(lx){ return Math.abs(lx-CH_X)>1.4 && Math.abs(lx-AQ_X)>1.2 && Math.abs(lx-CAR_X)>1.2 && Math.abs(lx-PUMP_X)>1.7; }
     function randLane(){ var lx; do{ lx=-7+Math.random()*14; }while(!laneOK(lx)); return lx; }
-    function addMover(mesh,type,mx,mz,phase,speed,side){
-      g.add(mesh);
-      movers.push({mesh:mesh,type:type,x:mx,z:mz,phase:phase,speed:speed,side:side||1});
+    /* type 'free' crosses; 'blocked' bounces; 'lane' follows a protein's drifting x */
+    function mover(mesh,key,type,x,z,speed,side,lane){
+      g.add(mesh); reg(key, mesh, INFO[key]);
+      movers.push({mesh:mesh,type:type,x:x,z:z,phase:Math.random()*6.3,speed:speed,side:side||1,lane:lane||null});
     }
+    for(var gi=0; gi<5; gi++) mover(gi%2?co2mesh():diatomic(OATOM,0.18,0.30),'gas','free',randLane(),(Math.random()-0.5)*1.6,0.32+Math.random()*0.12);
+    for(var ni=0; ni<2; ni++) mover(ball(0.20,NA,16),'ion','free',(ni-0.5)*0.35,(Math.random()-0.5)*0.4,0.30,1,chGroup);
+    for(var ki=0; ki<2; ki++) mover(ball(0.26,K_,16),'ion','free',(ki-0.5)*0.35,(Math.random()-0.5)*0.4+0.5,0.30,1,chGroup);
+    for(var nb=0; nb<2; nb++) mover(ball(0.20,NA,16),'ion','blocked',randLane(),(Math.random()-0.5)*1.6,0.4+Math.random()*0.15,Math.random()<0.5?1:-1);
+    for(var kb=0; kb<2; kb++) mover(ball(0.26,K_,16),'ion','blocked',randLane(),(Math.random()-0.5)*1.6,0.4+Math.random()*0.15,Math.random()<0.5?1:-1);
+    var glucoseMovers=[];
+    for(var gu=0; gu<2; gu++){ var gm=glucoseMesh(); mover(gm,'glucose','free',(gu-0.5)*0.3,(Math.random()-0.5)*0.3,0.26,1,carGroup); glucoseMovers.push(movers[movers.length-1]); }
+    mover(glucoseMesh(),'glucose','blocked',randLane(),(Math.random()-0.5)*1.4,0.35,Math.random()<0.5?1:-1);
+    for(var wi=0; wi<4; wi++) mover(waterMesh(),'water','free',(wi-1.5)*0.12,(Math.random()-0.5)*0.3,0.55+wi*0.05,1,aqGroup);
+    mover(waterMesh(),'water','free',randLane(),(Math.random()-0.5)*1.2,0.12);
 
-    for(var gi=0; gi<5; gi++){
-      var gm = gi%2 ? co2mesh() : diatomic(OATOM,0.18,0.30);
-      addMover(gm,'free', randLane(), (Math.random()-0.5)*1.6, Math.random()*6.3, 0.32+Math.random()*0.12);
-    }
-    for(var ni=0; ni<2; ni++) addMover(ion(NA,0.20),'free', CH_X+(ni-0.5)*0.35, (Math.random()-0.5)*0.4, Math.random()*6.3, 0.30);
-    for(var ki=0; ki<2; ki++) addMover(ion(K,0.26),'free', CH_X+(ki-0.5)*0.35, (Math.random()-0.5)*0.4+0.5, Math.random()*6.3, 0.30);
-    for(var nb=0; nb<2; nb++) addMover(ion(NA,0.20),'blocked', randLane(), (Math.random()-0.5)*1.6, Math.random()*6.3, 0.4+Math.random()*0.15, Math.random()<0.5?1:-1);
-    for(var kb=0; kb<2; kb++) addMover(ion(K,0.26),'blocked', randLane(), (Math.random()-0.5)*1.6, Math.random()*6.3, 0.4+Math.random()*0.15, Math.random()<0.5?1:-1);
-    for(var gu=0; gu<2; gu++) addMover(glucoseMesh(),'free', CAR_X+(gu-0.5)*0.3, (Math.random()-0.5)*0.3, Math.random()*6.3, 0.26);
-    addMover(glucoseMesh(),'blocked', randLane(), (Math.random()-0.5)*1.4, Math.random()*6.3, 0.35, Math.random()<0.5?1:-1);
-
-    self._movers = movers;
-
-    /* ---------- pump ion cycle state (separate from the free/blocked movers) ---------- */
+    /* ---------- pump ion cycle + ATP ---------- */
     var pna=[], pk=[];
-    for(var p3=0; p3<3; p3++){ var n=ion(NA,0.20); n.position.set(PUMP_X+(p3-1)*0.32,-1.6,(p3-1)*0.15); g.add(n); pna.push(n); }
-    for(var q3=0; q3<2; q3++){ var k2=ion(K,0.26); k2.position.set(PUMP_X+(q3-0.5)*0.32,1.7,(q3-0.5)*0.15); g.add(k2); pk.push(k2); }
-    var atp=ball(0.22,0xF0A73A,14); atp.position.set(PUMP_X+1.0,-1.6,0.6); g.add(atp);
-    var piAtom=ball(0.10,OATOM,10); piAtom.position.set(PUMP_X+1.4,-1.6,0.6); piAtom.visible=false; g.add(piAtom);
-    self._pump = {na:pna, k:pk, atp:atp, pi:piAtom};
+    for(var p3=0; p3<3; p3++){ var n=ball(0.20,NA,16); g.add(n); reg('ion', n, INFO.ion); pna.push({m:n, dx:(p3-1)*0.32, z:(p3-1)*0.15}); }
+    for(var q3=0; q3<2; q3++){ var k2=ball(0.26,K_,16); g.add(k2); reg('ion', k2, INFO.ion); pk.push({m:k2, dx:(q3-0.5)*0.32, z:(q3-0.5)*0.15}); }
+    var atp=ball(0.22,0xF0A73A,14); g.add(atp); reg('atp', atp, INFO.atp);
+    var piAtom=ball(0.10,OATOM,10); piAtom.visible=false; g.add(piAtom);
 
-    /* ---------- gradient toggle: plain button appended to #bar ---------- */
-    var btn = document.getElementById('gradientToggle');
-    if(!btn){
-      btn = document.createElement('button');
-      btn.id='gradientToggle'; btn.className='btn ghost';
-      document.getElementById('bar').insertBefore(btn, document.getElementById('lvl'));
-      btn.onclick=function(){
-        self._mode = self._mode==='down' ? 'against' : 'down';
-        btn.textContent = self._mode==='down' ? 'Passive · down the gradient' : 'Active · against the gradient (ATP)';
-      };
+    /* ============================================================
+       TONICITY BEAKER (right): animal cell + plant cell in a solution
+       ============================================================ */
+    var BX=13.5;
+    var beaker=new THREE.Group(); beaker.position.set(BX,0,0); g.add(beaker);
+    var sol=new THREE.Mesh(new THREE.BoxGeometry(7.4,9.6,5.2), mat(0x8FA8E8,{opacity:0.10,side:THREE.DoubleSide})); beaker.add(sol);
+    reg('solution', sol, INFO.solution, true);
+    var solutes=[];
+    for(var si=0; si<36; si++){
+      var sd=ball(0.1,SOLUTE,8);
+      var sx,sy,sz; do{ sx=(Math.random()-0.5)*6.6; sy=(Math.random()-0.5)*8.8; sz=(Math.random()-0.5)*4.4; }
+      while(Math.hypot(sx,sy-2.4,sz)<2.4 || Math.hypot(sx,sy+2.6,sz)<2.5);
+      sd.position.set(sx,sy,sz); sd.visible=false; beaker.add(sd); solutes.push(sd);
     }
-    btn.setAttribute('data-model-ui','transport');
-    btn.textContent = self._mode==='down' ? 'Passive · down the gradient' : 'Active · against the gradient (ATP)';
-  },
-  tick:function(t){
-    var self=this;
-    function tri(ph,a,b,c,d){
-      if(ph<a) return 0;
-      if(ph<b) return (ph-a)/(b-a);
-      if(ph<c) return 1;
-      if(ph<d) return 1-(ph-c)/(d-c);
-      return 0;
-    }
-    (self._movers||[]).forEach(function(m){
-      if(m.type==='free'){
-        m.mesh.position.set(m.x, 6.2*Math.sin(t*m.speed+m.phase), m.z);
-      } else {
-        var p=(Math.sin(t*m.speed+m.phase)+1)/2;
-        m.mesh.position.set(m.x, m.side*(0.55+p*5.6), m.z);
+    var solGrp=new THREE.Group(); solutes.forEach(function(s){ solGrp.add(s); }); beaker.add(solGrp);
+    reg('solute', solGrp, INFO.solute);
+
+    var ANIMAL=new THREE.Vector3(0,2.4,0), PLANT=new THREE.Vector3(0,-2.6,0);
+    var animal=new THREE.Group(); animal.position.copy(ANIMAL); beaker.add(animal);
+    animal.add(ball(1.5,0xE87FB0,28,{opacity:0.55,side:THREE.DoubleSide}));
+    for(var ai=0; ai<8; ai++){ var ad=ball(0.08,SOLUTE,6); ad.position.set((Math.random()-0.5)*1.8,(Math.random()-0.5)*1.8,(Math.random()-0.5)*1.8); animal.add(ad); }
+    reg('animal-cell', animal, INFO['animal-cell']);
+
+    var plantC=new THREE.Group(); plantC.position.copy(PLANT); beaker.add(plantC);
+    var pwall=new THREE.Mesh(new THREE.BoxGeometry(3.3,3.3,3.3), mat(CHOL,{opacity:0.25,side:THREE.DoubleSide})); plantC.add(pwall);
+    var pmemC=new THREE.Group(); plantC.add(pmemC);
+    pmemC.add(ball(1.5,0x2FB8A0,28,{opacity:0.5,side:THREE.DoubleSide}));
+    for(var pi2=0; pi2<8; pi2++){ var pdd=ball(0.08,SOLUTE,6); pdd.position.set((Math.random()-0.5)*1.8,(Math.random()-0.5)*1.8,(Math.random()-0.5)*1.8); pmemC.add(pdd); }
+    reg('plant-cell', plantC, INFO['plant-cell']); pwall.userData.passThrough=true;
+
+    /* water molecules flowing in/out of each cell */
+    var flows=[];
+    [animal,pmemC].forEach(function(cell,ci){
+      for(var fi=0; fi<8; fi++){
+        var w=waterMesh(); w.scale.setScalar(0.8); g.add(w); reg('water', w, INFO.water);
+        var th=fi/8*Math.PI*2+ci*0.4, phi=0.5+((fi*1.3)%1.2);
+        flows.push({m:w, cell:cell, dir:new THREE.Vector3(Math.cos(th)*Math.sin(phi),Math.cos(phi),Math.sin(th)*Math.sin(phi)), u:fi/8, alt:(fi%2?1:-1)});
       }
     });
-    var pump=self._pump;
-    if(pump){
-      var cyc=6.0, ph=(t%cyc)/cyc;
-      if(self._mode==='against'){
-        var naOut=tri(ph,0,0.32,0.85,0.97);
-        pump.na.forEach(function(n){ n.position.y = -1.6 + naOut*3.3; });
-        var kIn=tri(ph,0.42,0.72,0.80,0.94);
-        pump.k.forEach(function(k){ k.position.y = 1.7 - kIn*3.3; });
-        pump.atp.material.color.setHex(ph>=0.30 && ph<0.75 ? 0xB8842A : 0xF0A73A);
-        pump.pi.visible = ph>=0.30 && ph<0.55;
-        if(pump.pi.visible) pump.pi.position.y = -1.3 + (ph-0.30)*2.0;
-      } else {
-        pump.na.forEach(function(n){ n.position.y=1.7; });
-        pump.k.forEach(function(k){ k.position.y=-1.6; });
-        pump.atp.material.color.setHex(0xF0A73A);
-        pump.pi.visible=false;
-      }
+
+    var TON={hypo:{n:5,  animal:1.22, plant:1.0,  off:0,   flow:-1, label:'Solution: hypotonic ▶'},
+             iso: {n:16, animal:1.0,  plant:0.92, off:0,   flow:0,  label:'Solution: isotonic ▶'},
+             hyper:{n:36,animal:0.72, plant:0.62, off:0.35,flow:1,  label:'Solution: hypertonic ▶'}};
+    var tonBtn=K.button('transportTon','btn ghost',TON.iso.label);
+    function setTonicity(tn){
+      self._ton=tn; var T=TON[tn];
+      solutes.forEach(function(s,i){ s.visible = i<T.n; });
+      tonBtn.textContent=T.label;
     }
+    tonBtn.onclick=function(){ setTonicity(self._ton==='hypo'?'iso':self._ton==='iso'?'hyper':'hypo'); };
+    setTonicity('iso');
+
+    self._parts={lipids:lipids, PROTS:PROTS, movers:movers, glucoseMovers:glucoseMovers, carGroup:carGroup, pumpGroup:pumpGroup,
+      pna:pna, pk:pk, atp:atp, pi:piAtom, animal:animal, pmemC:pmemC, flows:flows, TON:TON, aScale:1, pScale:0.92, pOff:0};
+  },
+  onPick:function(info){ return this._K.onPick(info); },
+  onReset:function(){ this._K.onReset(); },
+
+  tick:function(t){
+    var self=this, P=self._parts; if(!P) return;
+    var f=self._K.tick(t), at=f.at, dt=f.dt;
+    function tri(ph,a,b,c,d){ if(ph<a) return 0; if(ph<b) return (ph-a)/(b-a); if(ph<c) return 1; if(ph<d) return 1-(ph-c)/(d-c); return 0; }
+
+    /* fluid mosaic: lipids wobble, proteins drift sideways */
+    for(var i=0;i<P.lipids.length;i++){
+      var L=P.lipids[i], wy=Math.sin(at*1.3+L.phase)*0.05, wx=Math.sin(at*0.7+L.phase)*0.04;
+      L.head.position.set(L.x+wx, L.side*1.3+wy, L.z);
+      L.tails[0].position.set(L.x-0.15+wx, L.side*0.62+wy, L.z);
+      L.tails[1].position.set(L.x+0.15+wx, L.side*0.62+wy, L.z);
+    }
+    P.PROTS.forEach(function(pr){ pr.o.position.x=pr.x+Math.sin(at*0.25+pr.ph)*0.3; });
+
+    /* molecules: free ones cross, blocked ones bounce, lane ones follow their protein */
+    P.movers.forEach(function(m){
+      var x = m.lane ? m.lane.position.x+m.x : m.x;
+      if(m.type==='free') m.mesh.position.set(x, 6.2*Math.sin(at*m.speed+m.phase), m.z);
+      else { var p=(Math.sin(at*m.speed+m.phase)+1)/2; m.mesh.position.set(x, m.side*(0.55+p*5.6), m.z); }
+    });
+    /* carrier flexes as glucose passes through it */
+    var flex=0; P.glucoseMovers.forEach(function(m){ flex=Math.max(flex, Math.max(0,1-Math.abs(m.mesh.position.y)/0.9)); });
+    P.carGroup.scale.set(1+0.14*flex, 1-0.1*flex, 1+0.14*flex);
+
+    /* sodium-potassium pump: 3 Na out, ATP -> ADP + Pi, 2 K in */
+    var px=P.pumpGroup.position.x, ph=(at%6)/6;
+    var naOut=tri(ph,0,0.32,0.85,0.97), kIn=tri(ph,0.42,0.72,0.80,0.94);
+    P.pna.forEach(function(n){ n.m.position.set(px+n.dx, -1.6+naOut*3.3, n.z); });
+    P.pk.forEach(function(k){ k.m.position.set(px+k.dx, 1.7-kIn*3.3, k.z); });
+    P.atp.position.set(px+1.0,-1.6,0.6);
+    P.atp.material.color.setHex(ph>=0.30 && ph<0.75 ? 0xB8842A : 0xF0A73A);
+    P.pi.visible = ph>=0.30 && ph<0.55;
+    if(P.pi.visible) P.pi.position.set(px+1.4, -1.3+(ph-0.30)*2.0, 0.6);
+
+    /* tonicity: cells change size, water streams in or out */
+    var T=P.TON[self._ton], e=1-Math.exp(-dt*2.5);
+    P.aScale += (T.animal-P.aScale)*e; P.pScale += (T.plant-P.pScale)*e; P.pOff += (T.off-P.pOff)*e;
+    P.animal.scale.setScalar(P.aScale);
+    P.pmemC.scale.setScalar(P.pScale); P.pmemC.position.set(P.pOff, -P.pOff*0.6, 0);
+    P.flows.forEach(function(w){
+      var sgn = T.flow!==0 ? T.flow : w.alt, spd = T.flow!==0 ? 0.28 : 0.09;
+      var u = ((w.u + at*spd*sgn) % 1 + 1) % 1;             /* 0 = inside the cell, 1 = out in the solution */
+      var rIn = (w.cell===P.animal ? 1.5*P.aScale : 1.5*P.pScale)*0.6, rOut = w.cell===P.animal ? 2.6 : 2.9;
+      var c = new THREE.Vector3(); w.cell.getWorldPosition(c);
+      w.m.position.copy(c).addScaledVector(w.dir, rIn + u*(rOut-rIn));
+    });
   }
 });
 
