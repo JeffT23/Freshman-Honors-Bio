@@ -2375,7 +2375,9 @@ MODELS.push({
       if(!s.alive){ s.mesh.visible=false; return; }
       s.mesh.visible=true;
       var sc=s.size*(1+0.04*Math.sin(at*2+s.x)); s.mesh.scale.setScalar(sc);
-      var fl=clamp(1-(at-s.flash)/0.8,0,1); s.mesh.userData.mat.emissive.setHex(0xFFFFFF); s.mesh.userData.mat.emissiveIntensity=fl*0.8;
+      var fl=clamp(1-(at-s.flash)/0.8,0,1);
+      if(fl>0){ s.mesh.userData.mat.emissive.setHex(0xFFFFFF); s.mesh.userData.mat.emissiveIntensity=fl*0.8; }
+      else if(self._K.glow.indexOf(s.mesh.children[0])<0) s.mesh.userData.mat.emissiveIntensity=0;
       if(s.res && !firstR) firstR=s; if(!s.res && !firstS) firstS=s;
     });
     if(firstR){ P.anchorR.visible=true; P.anchorR.position.set(firstR.x,0.2,firstR.z); } else P.anchorR.visible=false;
@@ -2401,6 +2403,311 @@ MODELS.push({
       if(u2>=1 && !A.done){ A.done=true; if(A.to.alive){ P.setRes(A.to,true); A.to.flash=at; } }
       if(at-A.start>2.4){ self._arc=null; P.plasmid.visible=false; }
     } else P.plasmid.visible=false;
+  }
+});
+
+/* ============================================================
+   MODEL 7 — The Energy Loop: Chloroplast ↔ Mitochondrion (Levels 22–24)
+   A chloroplast (grana, stroma, Calvin cycle, starch grain) faces a
+   mitochondrion (cristae, matrix, Krebs cycle). Molecule traffic runs
+   live along curves between them: CO₂, H₂O, O₂, glucose, pyruvate,
+   ATP/ADP, photons. A Light toggle (day/night) stops photosynthesis
+   but not respiration; an Oxygen toggle switches respiration to
+   fermentation. The Tour follows one tagged carbon atom around the
+   loop. Built on teachKit (Tour, Quiz, Labels).
+   ============================================================ */
+MODELS.push({
+  id:'energy',
+  name:'7 · The Energy Loop',
+  level:'Levels 22–24 · 3.1.9-12.E/G/K',
+  hint:'Click any organelle or molecule · Light and Oxygen toggles change what runs · Tour follows one carbon atom',
+  radius:17,
+  build:function(ctx){
+    var g=ctx.group, self=this;
+    var GREEN=0x7BC47F, GRANA=0x3F9F6B, AMBER=0xF0A73A, CRISTA=0xB8842A, PINK=0xE0417B, TEAL=0x2FB8A0, PURPLE=0x6B4BA8, CARB=0x3A3550, WHITE=0xF4F0E6;
+    self._light=true; self._o2=true; self._carbon=null;
+
+    var INFO={
+      'envelope':{tag:'Chloroplast', title:'Chloroplast envelope',
+        body:'A double membrane around the organelle that captures light energy and stores it in glucose. Like the mitochondrion it carries its own circular DNA and ribosomes — the signature of a free-living ancestor that was engulfed and kept.'},
+      'thylakoid':{tag:'Light reactions', title:'Thylakoid stacks (grana)',
+        body:'Chlorophyll in these membranes absorbs red and blue light and reflects green — which is why leaves look green. The captured energy splits water, releasing O₂, and loads ATP and NADPH for the stroma. No light, no light reactions: these stop the moment the sun goes down.'},
+      'stroma':{tag:'Calvin cycle', title:'Stroma',
+        body:'The fluid around the stacks. Here the Calvin cycle spends the ATP and NADPH from the thylakoids to bolt CO₂ onto a sugar — fixing carbon from the air into glucose. It uses no light directly, but it stalls within minutes without the ATP the light reactions supply.'},
+      'calvin':{tag:'Carbon fixation', title:'Calvin cycle',
+        body:'A cycle in the stroma that takes in CO₂ one molecule at a time and builds three-carbon sugars, paying for each turn with ATP and NADPH. Every carbon atom in every glucose a plant makes entered here as CO₂. Starve it of CO₂ and the rate drops even in full sun — CO₂ is the limiting factor.'},
+      'starch':{tag:'Storage', title:'Starch grain',
+        body:'Glucose the plant could not use right away, strung into starch. At night the chloroplast breaks it back down and exports sugar, so the plant\'s mitochondria keep respiring in the dark. Photosynthesis stores energy; respiration releases it — around the clock.'},
+      'mitoMembrane':{tag:'Mitochondrion', title:'Mitochondrial membranes',
+        body:'A smooth outer membrane and a deeply folded inner one. Found in plant and animal cells alike, this is where glucose is finished off and ATP is regenerated. The cells that work hardest — cardiac muscle — pack in the most of them.'},
+      'cristae':{tag:'Electron transport chain', title:'Cristae',
+        body:'Folds of the inner membrane that multiply the surface for the electron transport chain. Electrons stripped from glucose run along these proteins, pumping protons that drive ATP synthase; oxygen waits at the end as the final electron acceptor and becomes water. Cut off the O₂ and the chain backs up and stops.'},
+      'matrix':{tag:'Krebs cycle', title:'Matrix',
+        body:'The inner fluid, holding the Krebs-cycle enzymes plus the mitochondrion\'s own circular DNA. Pyruvate from glycolysis is broken apart here and its carbons leave as CO₂ — the same CO₂ the chloroplast will fix again.'},
+      'krebs':{tag:'Krebs cycle', title:'Krebs (citric acid) cycle',
+        body:'Each turn strips the remaining carbons from pyruvate as CO₂ and loads electron carriers (NADH, FADH₂) that feed the cristae. Only a little ATP is made directly here; the big payoff — about 34 of the ~36 ATP per glucose — comes from the chain the carriers deliver to.'},
+      'glycolysis':{tag:'Cytoplasm', title:'Glycolysis',
+        body:'The first stage of respiration, in the cytoplasm outside the mitochondrion: one glucose is split into two pyruvate, with a net gain of 2 ATP. It needs no oxygen, which is why it is the one stage every cell can run no matter what.'},
+      'co2':{tag:'Molecule', title:'Carbon dioxide (CO₂)',
+        body:'A product of respiration and a reactant of photosynthesis. In daylight the CO₂ leaving a plant\'s mitochondria is fixed again in the chloroplast next door; the rest enters through stomata from the air. At night it all leaves the plant.'},
+      'h2o':{tag:'Molecule', title:'Water (H₂O)',
+        body:'Split in the thylakoids to supply electrons — that is where photosynthetic O₂ comes from — and remade on the cristae when oxygen accepts the spent electrons at the end of respiration. Reactant on one side of the loop, product on the other.'},
+      'o2':{tag:'Molecule', title:'Oxygen (O₂)',
+        body:'Released when water is split in the light reactions, and consumed in the mitochondrion as the final electron acceptor. Without it the electron transport chain stops and the cell is left with fermentation.'},
+      'glucose':{tag:'Molecule', title:'Glucose (C₆H₁₂O₆)',
+        body:'The energy-storing product of photosynthesis and the fuel of respiration — six carbons that began as six CO₂. The plant burns most of it in its own mitochondria; what we eat is the surplus.'},
+      'pyruvate':{tag:'Molecule', title:'Pyruvate',
+        body:'The three-carbon halves of a split glucose. With oxygen available they enter the mitochondrion and the Krebs cycle; without it they are turned into lactic acid (muscle) or ethanol and CO₂ (yeast) just to keep glycolysis going.'},
+      'atp':{tag:'Energy currency', title:'ATP',
+        body:'Adenine, a ribose sugar and three phosphates. Breaking the bond to the terminal phosphate releases the energy that powers active transport, protein building and muscle — the first things to fail when ATP runs short. Spending it leaves ADP.'},
+      'adp':{tag:'Energy currency', title:'ADP',
+        body:'ATP with one phosphate spent. It cycles straight back to the thylakoids or the mitochondrion to be recharged — a cell turns over its own weight in ATP every day by recycling the same molecules.'},
+      'lactate':{tag:'Fermentation', title:'Lactic acid',
+        body:'Where pyruvate ends up when oxygen runs out. Converting it regenerates NAD⁺ so glycolysis can keep making its 2 ATP — a fraction of the ~36 with oxygen. In a sprinting muscle it accumulates; yeast take the other route, to ethanol and CO₂.'},
+      'sun':{tag:'Energy source', title:'Sunlight',
+        body:'The only energy that enters the loop. Photosynthesis converts it into chemical energy in glucose; everything downstream — every ATP in every mitochondrion — is sunlight stored, then released.'},
+      'moon':{tag:'Night', title:'Night',
+        body:'No photons, so the light reactions are off and the Calvin cycle stalls for lack of ATP and NADPH. Nothing else stops: the mitochondrion keeps burning glucose from the starch store and the plant now takes in O₂ and gives off CO₂, like any animal.'},
+      'work':{tag:'Where ATP is spent', title:'Cell work',
+        body:'Pumps, synthesis, movement. Each job breaks ATP\'s terminal phosphate bond and hands ADP back for recharging. With oxygen one glucose pays for about 36 of these; by fermentation, 2.'},
+      'air':{tag:'Gas exchange', title:'Stoma (air)',
+        body:'A pore in the leaf that trades gases with the atmosphere. By day the net flow is CO₂ in and O₂ out; at night, with the light reactions off, it reverses — the plant takes in O₂ and gives off CO₂.'},
+      'carbon':{tag:'Follow it', title:'Tagged carbon atom',
+        body:'One carbon, followed around the loop: it enters as CO₂, is fixed in the Calvin cycle, leaves the chloroplast inside glucose, is split in glycolysis, and exits the mitochondrion as CO₂ again — ready to be fixed once more.'}
+    };
+
+    var STOPS=[
+      {tag:'Overview', focus:null, r:17, keys:['envelope','mitoMembrane'], act:'reset', title:'Two organelles, one loop',
+       body:'On the left a chloroplast; on the right a mitochondrion. What one makes, the other uses: glucose and O₂ flow right, CO₂ and H₂O flow back left. A plant cell runs both at once. Watch the traffic for a moment, then step through the loop one carbon atom at a time.'},
+      {tag:'Light reactions', focus:'thylakoid', r:7, keys:['thylakoid','sun'], act:'reset', title:'Light hits the thylakoids',
+       body:'Chlorophyll in the stacked membranes absorbs red and blue light and reflects green. The energy splits water: the O₂ bubbles away, and the electrons load ATP and NADPH for the stroma. 6CO₂ + 6H₂O → C₆H₁₂O₆ + 6O₂ starts here, and it stops the instant the light does.'},
+      {tag:'Carbon in', focus:'carbon', r:7, keys:['carbon','co2','air'], act:'carbon:air', title:'Follow one carbon: it arrives as CO₂',
+       body:'The glowing atom is our tagged carbon. It drifts in through a stoma as CO₂ and reaches the stroma. It is not yet part of anything living — the Calvin cycle is about to change that.'},
+      {tag:'Calvin cycle', focus:'calvin', r:6, keys:['calvin','carbon','stroma'], act:'carbon:calvin', title:'Fixed in the Calvin cycle',
+       body:'In the stroma the cycle bolts the carbon onto a sugar, spending the ATP and NADPH the thylakoids just made. No light is used here directly — but without the light reactions the ATP runs out in minutes and the cycle stops. Low CO₂ limits it too: more light cannot help a plant starved of carbon.'},
+      {tag:'Glucose', focus:'carbon', r:7, keys:['glucose','carbon','starch'], act:'carbon:glucose', title:'It leaves inside glucose',
+       body:'Six fixed carbons make one glucose — energy stored as chemical bonds. Some is strung into starch grains for later; the rest leaves the chloroplast to be burned, by the plant itself, in the mitochondrion next door.'},
+      {tag:'Glycolysis', focus:'glycolysis', r:7, keys:['glycolysis','pyruvate','carbon'], act:'carbon:glycolysis', title:'Split in the cytoplasm',
+       body:'Glycolysis cuts glucose into two pyruvate and nets 2 ATP, outside the mitochondrion and without any oxygen. Our carbon is now riding a three-carbon pyruvate toward the matrix.'},
+      {tag:'Krebs cycle', focus:'krebs', r:6, keys:['krebs','matrix','carbon'], act:'carbon:krebs', title:'Stripped off in the Krebs cycle',
+       body:'In the matrix the cycle takes pyruvate apart. Each carbon leaves as CO₂ — our tagged atom included — while the electrons go onto carriers (NADH, FADH₂) bound for the cristae.'},
+      {tag:'ETC', focus:'cristae', r:6.5, keys:['cristae','o2','h2o'], act:'carbon:krebs', title:'Oxygen at the end of the chain',
+       body:'On the folded cristae the carriers hand their electrons to the transport chain, which pumps protons to drive ATP synthase — about 34 more ATP, ~36 per glucose in all. Oxygen is the final electron acceptor and becomes water. That is the whole reason you breathe.'},
+      {tag:'Carbon out', focus:'carbon', r:8, keys:['carbon','co2'], act:'carbon:out', title:'Out as CO₂ — and back around',
+       body:'Our carbon exits the mitochondrion as CO₂. In daylight it drifts straight back into the chloroplast to be fixed again. The products of each process are the reactants of the other: C₆H₁₂O₆ + 6O₂ → 6CO₂ + 6H₂O + ATP is the first equation run backwards.'},
+      {tag:'ATP', focus:'work', r:8, keys:['atp','adp','work'], act:'carbon:none', title:'The currency both sides trade in',
+       body:'Adenine, ribose, three phosphates. Snapping off the terminal phosphate powers pumps, protein synthesis and muscle, and leaves ADP — which cycles straight back to be recharged. The mitochondrion does not make energy; it moves energy from glucose into this bond.'},
+      {tag:'Night', focus:'starch', r:9, keys:['starch','moon','air','krebs'], act:'night', title:'Lights off: photosynthesis stops, respiration does not',
+       body:'The light reactions quit, the Calvin cycle stalls, the O₂ output ends. But the mitochondrion keeps running on glucose from the starch grain, now taking O₂ from the air and giving off CO₂ — a plant respires 24 hours a day. Photosynthesis is a daytime extra, not a replacement for respiration.'},
+      {tag:'No oxygen', focus:'glycolysis', r:7, keys:['lactate','glycolysis'], act:'o2off', title:'Without oxygen: fermentation',
+       body:'Day again, but cut the O₂. The chain and the Krebs cycle stop; only glycolysis keeps going, and only if NAD⁺ is regenerated — so pyruvate is converted to lactic acid (muscle) or ethanol and CO₂ (yeast). 2 ATP per glucose instead of ~36. The burn in a sprint is this.'},
+      {tag:'Takeaway', focus:null, r:17, keys:['glucose','o2','co2','h2o'], act:'reset', title:'One loop, two equations',
+       body:'Photosynthesis stores sunlight in glucose; respiration releases it into ATP. Each process\'s products are the other\'s reactants, and plants run both — in the light, in the dark, in every living cell. Try the Quiz with the Light and Oxygen toggles.'}
+    ];
+    STOPS.forEach(function(st){ st.enter=function(){ act(st.act); }; });
+    var QUIZ=[
+      {q:'Click where the light reactions happen.', keys:['thylakoid'], enter:function(){ act('reset'); },
+       ok:'The thylakoid stacks: chlorophyll, water splitting, O₂ release, ATP and NADPH.', hint:'The green discs stacked inside the chloroplast.'},
+      {q:'Click where the Calvin cycle fixes CO₂ into sugar.', keys:['calvin','stroma'], enter:function(){ act('reset'); },
+       ok:'The Calvin cycle, turning in the stroma — the fluid around the stacks.', hint:'The turning ring inside the chloroplast, or the fluid around it.'},
+      {q:'Click where the Krebs cycle runs.', keys:['krebs','matrix'], enter:function(){ act('reset'); },
+       ok:'The matrix — the inner fluid of the mitochondrion.', hint:'The turning ring deep inside the mitochondrion.'},
+      {q:'Click the folds that hold the electron transport chain.', keys:['cristae'], enter:function(){ act('reset'); },
+       ok:'The cristae: folds of the inner membrane, where oxygen finally accepts the electrons.', hint:'The plates folding into the mitochondrion.'},
+      {q:'It is NIGHT. Click the organelle that is still making ATP.', keys:['mitoMembrane','cristae','matrix','krebs'], enter:function(){ act('night'); },
+       ok:'The mitochondrion. Respiration never stops — only photosynthesis needs light.', hint:'Not the chloroplast. Which organelle keeps running in the dark?'},
+      {q:'Click a molecule that is a PRODUCT of photosynthesis and a REACTANT of respiration.', keys:['glucose','o2'], enter:function(){ act('reset'); },
+       ok:'Glucose or O₂: made by the chloroplast, consumed by the mitochondrion.', hint:'Something traveling from the chloroplast toward the mitochondrion.'},
+      {q:'Click a molecule that is a PRODUCT of respiration and a REACTANT of photosynthesis.', keys:['co2','h2o'], enter:function(){ act('reset'); },
+       ok:'CO₂ or H₂O: the mitochondrion\'s waste is the chloroplast\'s raw material.', hint:'Something traveling from the mitochondrion back toward the chloroplast.'},
+      {q:'Click the molecule whose terminal phosphate bond powers cell work.', keys:['atp'], enter:function(){ act('reset'); },
+       ok:'ATP — adenine, ribose and three phosphates; the third bond is the one that pays.', hint:'The purple-and-amber chain heading out to the cell-work station.'},
+      {q:'Click the gas that comes from splitting water in the thylakoids.', keys:['o2'], enter:function(){ act('reset'); },
+       ok:'O₂. Photosynthetic oxygen comes from water, not from CO₂.', hint:'Pairs of pink atoms leaving the chloroplast.'},
+      {q:'Click the stage of respiration that runs OUTSIDE the mitochondrion.', keys:['glycolysis'], enter:function(){ act('reset'); },
+       ok:'Glycolysis, in the cytoplasm: glucose → 2 pyruvate, 2 ATP, no oxygen needed.', hint:'The teal patch between the two organelles.'},
+      {q:'No oxygen. Click the molecule that builds up in a sprinting muscle.', keys:['lactate'], enter:function(){ act('o2off'); },
+       ok:'Lactic acid — made from pyruvate to regenerate NAD⁺ so glycolysis can continue.', hint:'The teal molecules collecting below the glycolysis patch.'},
+      {q:'Click the energy source that drives the whole loop.', keys:['sun'], enter:function(){ act('reset'); },
+       ok:'Sunlight. Everything downstream is stored sunlight.', hint:'Top left.'},
+      {q:'It is NIGHT. Click where the chloroplast gets glucose from with the light reactions off.', keys:['starch'], enter:function(){ act('night'); },
+       ok:'The starch grain — daytime surplus, broken down to keep respiration fed in the dark.', hint:'The pale grain inside the chloroplast.'},
+      {q:'Click the reason photosynthesis has stopped in this scene.', keys:['moon'], enter:function(){ act('night'); },
+       ok:'Night: no photons, no light reactions. Respiration carries on regardless.', hint:'What replaced the sun, top left?'},
+      {q:'Click the molecule that is ATP with one phosphate spent.', keys:['adp'], enter:function(){ act('reset'); },
+       ok:'ADP, on its way back to be recharged.', hint:'The purple-and-amber chains returning from the cell-work station.'}
+    ];
+    var K=teachKit(self, {id:'energy', radius:17, group:g, labels:true, stops:STOPS, quiz:QUIZ, onTourEnd:function(){ act('reset'); }});
+    var reg=K.register;
+    function glowSafe(m, hex, inten){ if(K.glow.indexOf(m)>=0) return; m.material.emissive.setHex(hex); m.material.emissiveIntensity=inten; }
+
+    /* ---------- chloroplast ---------- */
+    var C=new THREE.Vector3(-5.6,0,0);
+    var chl=new THREE.Group(); chl.position.copy(C); g.add(chl);
+    var env=new THREE.Group();
+    var outer=ball(1,GREEN,36,{opacity:0.22}); outer.scale.set(3.9,2.3,2.7); env.add(outer);
+    var inner=ball(1,GREEN,32,{opacity:0.16}); inner.scale.set(3.65,2.1,2.5); env.add(inner);
+    chl.add(env); reg('envelope', env, INFO.envelope, true);
+    var stroma=ball(1,0xC9EBB8,28,{opacity:0.12}); stroma.scale.set(3.45,1.95,2.35); chl.add(stroma); reg('stroma', stroma, INFO.stroma, true);
+    var granaMat=mat(GRANA,{rough:0.5}), granaGeo=new THREE.CylinderGeometry(0.42,0.42,0.09,18), granaMeshes=[];
+    var GPOS=[[-1.4,0.2,0],[-0.2,0.6,-0.5],[1.0,0.4,0.3],[-0.7,-0.8,-0.2]];
+    var grana=new THREE.Group(); chl.add(grana);
+    GPOS.forEach(function(p){ var st=new THREE.Group(); st.position.set(p[0],p[1],p[2]);
+      for(var k=0;k<5;k++){ var d=new THREE.Mesh(granaGeo, granaMat); d.position.y=(k-2)*0.13; st.add(d); granaMeshes.push(d); }
+      grana.add(st); });
+    [[0,1],[1,2],[0,3]].forEach(function(pr){ var a=new THREE.Vector3().fromArray(GPOS[pr[0]]), b=new THREE.Vector3().fromArray(GPOS[pr[1]]); grana.add(segment(a,b,0.035,GRANA)); });
+    reg('thylakoid', grana, INFO.thylakoid);
+    function cycleRing(hex){ var r=new THREE.Group(); r.add(new THREE.Mesh(new THREE.TorusGeometry(0.7,0.06,8,40), mat(hex)));
+      for(var i=0;i<3;i++){ var b=ball(0.13,hex,10); b.userData.ang=i*Math.PI*2/3; r.add(b); } r.userData.spin=0; return r; }
+    var calvin=cycleRing(TEAL); calvin.position.set(1.0,-0.9,1.1); calvin.rotation.set(-1.1,0.3,0); chl.add(calvin); reg('calvin', calvin, INFO.calvin);
+    var starch=ball(0.42,WHITE,16,{rough:0.9}); starch.scale.set(1.3,0.9,1); starch.position.set(-1.3,-0.9,0.9); chl.add(starch); reg('starch', starch, INFO.starch);
+    var cdna=new THREE.Mesh(new THREE.TorusGeometry(0.22,0.04,6,18), mat(PINK)); cdna.position.set(1.9,0.4,-0.9); cdna.rotation.x=1; chl.add(cdna);
+
+    /* ---------- mitochondrion ---------- */
+    var M=new THREE.Vector3(5.6,0,0);
+    var mito=new THREE.Group(); mito.position.copy(M); g.add(mito);
+    var menv=new THREE.Group();
+    var mouter=ball(1,AMBER,36,{opacity:0.26}); mouter.scale.set(3.7,1.9,2.0); menv.add(mouter);
+    var minner=ball(1,AMBER,32,{opacity:0.16}); minner.scale.set(3.3,1.65,1.75); menv.add(minner);
+    mito.add(menv); reg('mitoMembrane', menv, INFO.mitoMembrane, true);
+    var matrix=ball(1,0xF6D9A8,28,{opacity:0.12}); matrix.scale.set(3.15,1.5,1.6); mito.add(matrix); reg('matrix', matrix, INFO.matrix, true);
+    var cristae=new THREE.Group(), cristaeMeshes=[];
+    for(var ci=0;ci<5;ci++){ var cp=capsule(0.42,0.5,CRISTA,{rough:0.5}); cp.scale.set(0.16,1,1);
+      var top=(ci%2===0); cp.position.set(-1.6+ci*0.8, top?0.5:-0.5, 0.1); cristae.add(cp); cp.children.forEach(function(m){ cristaeMeshes.push(m); }); }
+    mito.add(cristae); reg('cristae', cristae, INFO.cristae);
+    var krebs=cycleRing(TEAL); krebs.position.set(-0.2,-0.1,0.8); krebs.rotation.set(-1.1,-0.3,0); krebs.scale.setScalar(0.85); mito.add(krebs); reg('krebs', krebs, INFO.krebs);
+    var mdna=new THREE.Mesh(new THREE.TorusGeometry(0.18,0.035,6,18), mat(PINK)); mdna.position.set(1.9,0.3,-0.7); mdna.rotation.x=1.2; mito.add(mdna);
+
+    /* ---------- stations in the cytoplasm ---------- */
+    var glyc=new THREE.Group(); glyc.position.set(0,-1.6,1.2);
+    var gdisc=new THREE.Mesh(new THREE.CylinderGeometry(1.05,1.05,0.1,28), mat(TEAL,{opacity:0.3})); glyc.add(gdisc);
+    var gring=new THREE.Mesh(new THREE.TorusGeometry(1.05,0.05,6,36), mat(TEAL)); gring.rotation.x=Math.PI/2; glyc.add(gring);
+    g.add(glyc); reg('glycolysis', glyc, INFO.glycolysis);
+    var work=new THREE.Mesh(new THREE.TorusKnotGeometry(0.38,0.11,56,8), mat(PURPLE,{rough:0.4})); work.position.set(9.0,-2.6,1.4); g.add(work); reg('work', work, INFO.work);
+    var pool=new THREE.Mesh(new THREE.CylinderGeometry(0.9,0.9,0.08,24), mat(TEAL,{opacity:0.18})); pool.position.set(0.2,-3.5,1.6); pool.visible=false; g.add(pool);
+    var stoma=new THREE.Group(); stoma.position.set(0,4.3,-1.3);
+    var lipL=capsule(0.26,1.4,GREEN,{rough:0.6}); lipL.position.z=0.34; lipL.rotation.z=Math.PI/2; lipL.rotation.y=0.25; stoma.add(lipL);
+    var lipR=capsule(0.26,1.4,GREEN,{rough:0.6}); lipR.position.z=-0.34; lipR.rotation.z=Math.PI/2; lipR.rotation.y=-0.25; stoma.add(lipR);
+    g.add(stoma); reg('air', stoma, INFO.air);
+    var sun=ball(1.0,0xFFD866,28,{rough:0.9}); sun.material.emissive.setHex(0xFFB020); sun.material.emissiveIntensity=0.7; sun.position.set(-9.0,4.6,-3.0); g.add(sun); reg('sun', sun, INFO.sun);
+    var moon=ball(0.75,0xB8B4C8,24,{rough:0.95}); moon.position.copy(sun.position); moon.visible=false; g.add(moon); reg('moon', moon, INFO.moon);
+    var dome=new THREE.Mesh(new THREE.SphereGeometry(40,24,16), new THREE.MeshBasicMaterial({color:0x1C1530, transparent:true, opacity:0, side:THREE.BackSide, depthWrite:false})); dome.renderOrder=-5; g.add(dome);
+    var carbon=new THREE.Group();
+    var cball=ball(0.24,0xFFFFFF,16); cball.material.emissive.setHex(0xFFF2B0); cball.material.emissiveIntensity=0.9; carbon.add(cball);
+    var halo=new THREE.Mesh(new THREE.TorusGeometry(0.42,0.035,6,28), mat(0xFFE2A0)); halo.material.emissive.setHex(0xFFC040); halo.material.emissiveIntensity=0.6; carbon.add(halo);
+    carbon.visible=false; g.add(carbon); reg('carbon', carbon, INFO.carbon);
+
+    /* ---------- molecule makers (shared geometries + materials) ---------- */
+    var GEO={a:new THREE.SphereGeometry(0.15,10,8), b:new THREE.SphereGeometry(0.12,10,8), h:new THREE.SphereGeometry(0.09,8,6), p:new THREE.SphereGeometry(0.11,10,8), n:new THREE.SphereGeometry(0.2,12,10)};
+    var MAT={c:mat(CARB), o:mat(PINK), h:mat(0xFFFFFF), p:mat(AMBER), n:mat(PURPLE), g:mat(AMBER,{rough:0.4}), y:mat(0xFFE66B)};
+    MAT.y.emissive.setHex(0xFFC800); MAT.y.emissiveIntensity=0.8;
+    function mk(parts){ var grp=new THREE.Group(); parts.forEach(function(p){ var m=new THREE.Mesh(GEO[p[0]], MAT[p[1]]); m.position.set(p[2],p[3],p[4]); grp.add(m); }); return grp; }
+    var MAKE={
+      co2:function(){ return mk([['a','c',0,0,0],['b','o',0.3,0,0],['b','o',-0.3,0,0]]); },
+      h2o:function(){ return mk([['a','o',0,0,0],['h','h',0.2,0.17,0],['h','h',-0.2,0.17,0]]); },
+      o2:function(){ return mk([['a','o',0.16,0,0],['a','o',-0.16,0,0]]); },
+      glucose:function(){ return new THREE.Mesh(new THREE.TorusGeometry(0.3,0.075,6,6), MAT.g); },
+      pyruvate:function(){ var m=new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.1,0.55,10), MAT.g); m.rotation.z=Math.PI/2; return m; },
+      lactate:function(){ return mk([['b','c',0,0,0],['b','c',0.24,0,0],['b','c',-0.24,0,0],['h','o',0.24,0.2,0]]); },
+      atp:function(){ return mk([['n','n',-0.3,0,0],['p','p',0,0,0],['p','p',0.24,0,0],['p','p',0.48,0,0]]); },
+      adp:function(){ return mk([['n','n',-0.3,0,0],['p','p',0,0,0],['p','p',0.24,0,0]]); },
+      photon:function(){ var m=new THREE.Mesh(GEO.h, MAT.y); return m; }
+    };
+
+    /* ---------- flows: particles spaced along a curve, shown while active() ---------- */
+    var FLOWS=[];
+    function flow(key, pts, n, speed, active, off, regKey){
+      regKey=regKey||key;
+      var F={key:key, curve:new THREE.CatmullRomCurve3(pts.map(function(p){ return new THREE.Vector3(p[0],p[1],p[2]); })), n:n, speed:speed, active:active, vis:0, parts:[], off:off||0};
+      for(var i=0;i<n;i++){ var m=MAKE[key](); m.visible=false; g.add(m); reg(regKey, m, INFO[regKey]); F.parts.push(m); }
+      FLOWS.push(F); return F;
+    }
+    var day=function(){ return self._light; }, night=function(){ return !self._light; }, ox=function(){ return self._o2; }, nox=function(){ return !self._o2; };
+    var dayOx=function(){ return self._light&&self._o2; }, nightOx=function(){ return !self._light&&self._o2; };
+    var always=function(){ return true; };
+    var CAL=[-4.6,-0.9,1.1], KRE=[5.4,-0.1,0.8], GLY=[0,-1.6,1.2], AIR=[0,4.3,-1.3], WRK=[9.0,-2.6,1.4], CRI=[5.6,0.4,0.2];
+    flow('co2',[AIR,[-2.5,3.2,-0.4],[-4.0,1.5,0.9],CAL],4,0.07,day);
+    flow('co2',[[5.4,0.3,1.3],[3.0,2.2,2.0],[0,2.8,2.4],[-3,1.8,1.8],CAL],5,0.06,dayOx,0.5);
+    flow('co2',[[5.4,0.3,1.3],[4.5,2.4,0.8],[2.5,3.8,-0.5],AIR],4,0.08,nightOx);
+    flow('h2o',[[-9.5,-4.2,0.8],[-8.0,-2.6,0.6],[-6.3,-0.8,-0.2]],3,0.09,day);
+    flow('h2o',[[5.0,0.6,0.4],[2.5,-0.2,2.6],[-1.5,0.3,2.8],[-4.4,0.9,1.0],[-4.6,0.4,0.3]],4,0.06,dayOx);
+    flow('h2o',[[5.0,0.6,0.4],[6.5,-1.8,1.5],[8.5,-4.3,1.0]],3,0.09,nightOx);
+    flow('o2',[[-5.8,0.6,-0.5],[-3.5,1.4,-1.4],[0,1.0,-2.0],[3.5,0.9,-1.2],CRI],5,0.07,dayOx);
+    flow('o2',[[-7.0,0.2,0],[-7.6,2.2,-0.8],[-4,3.8,-1.5],AIR],3,0.08,day);
+    flow('o2',[AIR,[2.8,3.6,-1.4],[4.8,2.0,-0.6],CRI],4,0.08,nightOx);
+    flow('glucose',[CAL,[-2.6,-1.4,1.4],GLY],4,0.08,day);
+    flow('glucose',[[-6.9,-0.9,0.9],[-3.6,-1.9,1.5],GLY],3,0.08,night);
+    flow('pyruvate',[GLY,[2.6,-1.2,1.3],KRE],5,0.09,ox);
+    flow('lactate',[GLY,[0.2,-2.6,1.5],[0.2,-3.5,1.6]],5,0.12,nox);
+    flow('atp',[[-4.6,0.4,0.3],[-4.1,-0.1,0.9],CAL],2,0.18,day);
+    flow('adp',[CAL,[-5.1,-0.3,0.4],[-4.6,0.4,0.3]],2,0.18,day);
+    flow('atp',[[6.4,-0.5,0.5],[7.6,-1.4,1.2],WRK],4,0.1,ox);
+    flow('atp',[GLY,[4,-3.2,1.8],WRK],2,0.08,always);
+    flow('adp',[WRK,[8.4,-1.2,-0.3],[6.4,-0.5,0.5]],3,0.1,ox);
+    flow('adp',[WRK,[4,-3.6,0.4],GLY],2,0.08,nox);
+    flow('photon',[[-9.0,4.6,-3.0],[-8.0,2.8,-1.6],[-7.0,0.2,0]],6,0.5,day,0,'sun');
+
+    /* ---------- labels ---------- */
+    K.label(env,'Chloroplast',2.7); K.label(menv,'Mitochondrion',2.3); K.label(grana.children[1],'Thylakoids (grana)',0.6);
+    K.label(calvin,'Calvin cycle',0.9); K.label(krebs,'Krebs cycle',0.8); K.label(cristae.children[2],'Cristae · ETC',-1.2);
+    K.label(glyc,'Glycolysis · cytoplasm',0.5); K.label(starch,'Starch',-0.7); K.label(stoma,'Stoma · air',0.7);
+    var sunLabel=K.label(sun,'Sun · day',-1.5); var workLabel=K.label(work,'Cell work · ~36 ATP per glucose',0.8);
+    K.label(pool,'Lactic acid (no O₂)',-0.5);
+
+    /* ---------- state: light / oxygen / tagged carbon ---------- */
+    var STATION={air:[-2.5,3.2,-0.4], glucose:[-2.6,-1.2,1.4], glycolysis:[0,-1.1,1.2], out:[3.0,2.2,2.0]};
+    function setLight(on){ self._light=on; sun.visible=on; moon.visible=!on; lightBtn.textContent=on?'Light: day':'Light: night'; K.relabel(sunLabel, on?'Sun · day':'Night'); }
+    function setO2(on){ self._o2=on; o2Btn.textContent=on?'Oxygen: on':'Oxygen: off'; pool.visible=!on; K.relabel(workLabel, on?'Cell work · ~36 ATP per glucose':'Cell work · 2 ATP per glucose'); }
+    function act(name){
+      if(name==='reset'){ setLight(true); setO2(true); self._carbon=null; }
+      else if(name==='night'){ setLight(false); setO2(true); self._carbon=null; }
+      else if(name==='o2off'){ setLight(true); setO2(false); self._carbon=null; }
+      else if(name.indexOf('carbon:')===0){ var st=name.slice(7); setLight(true); setO2(true); self._carbon=(st==='none')?null:st; }
+      if(self._carbon && !carbon.visible){ var p0=STATION[self._carbon]||STATION.air; carbon.position.set(p0[0],p0[1],p0[2]); }
+    }
+    var lightBtn=K.button('energyLight','btn','Light: day'); lightBtn.onclick=function(){ setLight(!self._light); };
+    var o2Btn=K.button('energyO2','btn ghost','Oxygen: on'); o2Btn.onclick=function(){ setO2(!self._o2); };
+    act('reset');
+
+    self._parts={FLOWS:FLOWS, calvin:calvin, krebs:krebs, granaMeshes:granaMeshes, cristaeMeshes:cristaeMeshes, carbon:carbon, halo:halo, work:work, dome:dome, sun:sun, STATION:STATION, glowSafe:glowSafe, tmp:new THREE.Vector3()};
+  },
+  onPick:function(info){ return this._K.onPick(info); },
+  onReset:function(){ this._K.onReset(); },
+
+  tick:function(t){
+    var self=this, P=self._parts; if(!P) return;
+    var f=self._K.tick(t), at=f.at, dt=f.dt, k=Math.min(1,dt*4);
+
+    /* particle traffic */
+    for(var i=0;i<P.FLOWS.length;i++){
+      var F=P.FLOWS[i]; F.vis+=((F.active()?1:0)-F.vis)*k;
+      var show=F.vis>0.03;
+      for(var j=0;j<F.n;j++){
+        var m=F.parts[j]; m.visible=show; if(!show) continue;
+        var u=(at*F.speed+j/F.n+F.off)%1; if(u<0) u+=1;
+        F.curve.getPointAt(u, m.position);
+        var ends=Math.min(1,u*6,(1-u)*6); m.scale.setScalar(Math.max(0.01,F.vis*(0.3+0.7*ends)));
+        m.rotation.y=at*1.3+j; m.rotation.x=0.4*Math.sin(at+j);
+      }
+    }
+    /* cycles turn only while they have fuel; grana glow with light; cristae pulse with oxygen */
+    var calvinOn=self._light, krebsOn=self._o2;
+    P.calvin.userData.spin+=dt*(calvinOn?1.6:0); P.krebs.userData.spin+=dt*(krebsOn?1.6:0);
+    [P.calvin,P.krebs].forEach(function(r){ for(var b=1;b<r.children.length;b++){ var a=r.children[b].userData.ang+r.userData.spin; r.children[b].position.set(Math.cos(a)*0.7, Math.sin(a)*0.7, 0); } });
+    var gl=self._light?0.25+0.15*Math.sin(at*3):0; P.glowSafe(P.granaMeshes[0],0xBFFFA0,gl);
+    P.cristaeMeshes.forEach(function(m,i){ var ph=Math.floor(i/3); var v=self._o2?0.35*Math.max(0,Math.sin(at*4-ph*1.1)):0; P.glowSafe(m,0xFFD080,v); });
+    P.work.rotation.y=at*0.6; P.work.rotation.x=at*0.3;
+    P.sun.material.emissiveIntensity=0.6+0.15*Math.sin(at*2);
+    P.dome.material.opacity+=((self._light?0:0.45)-P.dome.material.opacity)*k;
+
+    /* tagged carbon: lerp to its station, orbit a cycle ring when it is in one */
+    if(self._carbon){
+      var dest=P.tmp, st=self._carbon;
+      if(st==='calvin'||st==='krebs'){ var ring=(st==='calvin')?P.calvin:P.krebs; var a2=at*1.6; dest.set(Math.cos(a2)*0.7, Math.sin(a2)*0.7, 0); ring.localToWorld(dest); }
+      else { var s=P.STATION[st]; dest.set(s[0],s[1],s[2]); dest.y+=0.15*Math.sin(at*2); }
+      P.carbon.visible=true; P.carbon.position.lerp(dest, 1-Math.exp(-dt*4));
+      P.halo.rotation.x=at*2; P.halo.rotation.y=at*1.3;
+    } else P.carbon.visible=false;
   }
 });
 
