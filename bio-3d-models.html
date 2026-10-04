@@ -158,8 +158,12 @@ var orbit = {
     );
     camera.lookAt(this.target);
   },
-  reset:function(){ this.theta=this.base.theta; this.phi=this.base.phi; this.radius=this.base.radius; this.apply(); },
-  frame:function(r){ this.base.radius=r; this.radius=r; this.apply(); }
+  reset:function(){
+    this.theta=this.base.theta; this.phi=this.base.phi; this.radius=this.base.radius;
+    this.target.set(0,0,0); this.apply();
+    if(current && current.onReset) current.onReset();
+  },
+  frame:function(r){ this.base.radius=r; this.radius=r; this.target.set(0,0,0); this.apply(); }
 };
 function initOrbit(el){
   var down=false, lx=0, ly=0, pinch=0, moved=0;
@@ -199,15 +203,34 @@ function initOrbit(el){
 }
 
 /* ---------------- picking + info panel ---------------- */
-function onClick(e){
-  pointer.x = (e.clientX / W) * 2 - 1;
-  pointer.y = -(e.clientY / H) * 2 + 1;
+function infoOf(o){ while(o && !o.userData.info) o = o.parent; return o ? o.userData.info : null; }
+/* world-space extent of the registered structure a mesh belongs to, cached on first use */
+function shellSize(o){
+  while(o && !o.userData.info) o = o.parent;
+  if(!o) return Infinity;
+  if(o.userData.shellSize===undefined) o.userData.shellSize = new THREE.Box3().setFromObject(o).getSize(new THREE.Vector3()).length();
+  return o.userData.shellSize;
+}
+/* what a click at screen (cx,cy) selects: returns the structure's info, or null */
+function pickAt(cx, cy){
+  pointer.x = (cx / W) * 2 - 1;
+  pointer.y = -(cy / H) * 2 + 1;
+  camera.updateMatrixWorld(); /* a click right after Recenter or a zoom must use the camera's new pose */
   raycaster.setFromCamera(pointer, camera);
   var hits = raycaster.intersectObjects(PICKABLE, true);
-  if(!hits.length){ hideInfo(); return; }
-  var o = hits[0].object;
-  while(o && !o.userData.info) o = o.parent;
-  if(o && o.userData.info) showInfo(o.userData.info);
+  /* the raycaster ignores .visible, so drop anything hidden or inside a hidden group */
+  hits = hits.filter(function(h){ var o=h.object; while(o){ if(o.visible===false) return false; o=o.parent; } return true; });
+  /* translucent shells flagged passThrough yield to whatever is behind them */
+  var hit = null;
+  for(var i=0;i<hits.length;i++){ if(!hits[i].object.userData.passThrough){ hit=hits[i]; break; } }
+  /* only shells were crossed: choose the innermost one (rim -> outer wall, interior -> membrane) */
+  if(!hit){ var best=Infinity; for(var j=0;j<hits.length;j++){ var s=shellSize(hits[j].object); if(s<best){ best=s; hit=hits[j]; } } }
+  return hit ? infoOf(hit.object) : null;
+}
+function onClick(e){
+  var info = pickAt(e.clientX, e.clientY);
+  if(current && current.onPick && current.onPick(info)===false) return;
+  if(info) showInfo(info); else hideInfo();
 }
 function showInfo(i){
   document.getElementById('infoTag').textContent = i.tag || '';
@@ -290,9 +313,13 @@ function segment(p1, p2, r, hex){
 }
 
 /* ============================================================
-   MODEL 1 — Cell Explorer (Level 4 & 5)
-   Bacterial cell beside a human cell, clickable structures.
-   This is the reference implementation. Models 2-5 follow it.
+   MODEL 1 — Cell Explorer (Levels 4 & 5)
+   A bacterium (with a bacteriophage landing on it and a biofilm
+   nearby) beside an animal cell that can be toggled to a plant cell.
+   Every structure is clickable and registered under a key; a Tour
+   button walks the Level 4-5 concepts stop by stop, and a Quiz
+   button asks the student to find structures in the scene.
+   Models 2-5 follow the same MODELS.push pattern.
    ============================================================ */
 var MODELS = [];
 
@@ -300,118 +327,502 @@ MODELS.push({
   id:'cells',
   name:'1 · Bacteria vs. Your Cells',
   level:'Levels 4–5 · 3.1.9-12.B',
-  hint:'Click any structure. Bacterium on the left, human cell on the right — note the missing nucleus.',
+  hint:'Click any structure to focus on it · Tour walks you through · Quiz asks you to find things',
   radius:20,
   build:function(ctx){
-    var add=ctx.add, g=ctx.group;
+    var g=ctx.group, self=this;
+    self._plant=false; self._stop=-1; self._quiz=null; self._glow=[];
+    self._focusObj=null; self._focusPt=null; self._focusR=null; self._sel=null;
+    self._tmp=new THREE.Vector3(); self._ang=0; self._lastT=undefined; self._animT=0;
+    var REG={}; self._reg=REG;
 
-    /* ---------- prokaryote (left) ---------- */
-    var pro = new THREE.Group(); pro.position.x = -7.5; g.add(pro);
+    /* register a structure: info gets a key, every mesh becomes pickable,
+       shells flagged passThrough let clicks reach what is inside them */
+    function reg(key, obj, info, passThrough){
+      info.key=key; obj.userData.info=info;
+      obj.traverse(function(o){ if(o.isMesh){ PICKABLE.push(o); if(passThrough) o.userData.passThrough=true; } });
+      (REG[key]=REG[key]||[]).push(obj);
+      return obj;
+    }
+    function helixTube(len, turns, rad, tubeR, hex){
+      var pts=[];
+      for(var i=0;i<=60;i++){ var u=i/60, a=u*turns*Math.PI*2; pts.push(new THREE.Vector3(u*len, rad*Math.cos(a), rad*Math.sin(a))); }
+      return new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts),90,tubeR,8,false), mat(hex));
+    }
+    var UP=new THREE.Vector3(0,1,0), FWD=new THREE.Vector3(0,0,1);
 
-    var wall = capsule(2.5, 3.4, 0x7BC47F, {opacity:0.30});
-    wall.rotation.z = Math.PI/2;
-    wall.userData.info = {tag:'Prokaryote', title:'Peptidoglycan cell wall',
-      body:'Rigid mesh outside the membrane. Human cells have no wall at all, which is exactly why penicillin — which blocks the enzyme that cross-links this mesh — harms bacteria and not you.'};
-    wall.children.forEach(function(c){ PICKABLE.push(c); c.userData.info = wall.userData.info; });
-    pro.add(wall);
+    /* ---------- info text ---------- */
+    var INFO={
+      'membrane-pro':{tag:'Prokaryote', title:'Plasma membrane (bacterium)',
+        body:'A phospholipid bilayer, the same basic architecture as yours. In bacteria it also runs the electron transport chain, since there are no mitochondria to do it.'},
+      'wall-pg':{tag:'Prokaryote', title:'Peptidoglycan cell wall',
+        body:'A rigid mesh of sugar chains cross-linked by short peptides, outside the membrane. Your cells have no wall at all — which is exactly why penicillin, which blocks the enzyme that cross-links this mesh, harms bacteria and not you.'},
+      'nucleoid':{tag:'Prokaryote', title:'Circular chromosome (nucleoid)',
+        body:'One circular DNA molecule, loose in the cytoplasm with no membrane around it. That missing nuclear envelope is the single defining difference between prokaryotes and eukaryotes.'},
+      'plasmid':{tag:'Prokaryote', title:'Plasmid',
+        body:'A small DNA circle separate from the chromosome. Plasmids carry antibiotic-resistance genes and can be passed between bacteria — even between species — so resistance spreads sideways, not just by descent.'},
+      'ribosome':{tag:'Both cell types', title:'Ribosome',
+        body:'Builds protein in every cell alive — the one organelle prokaryotes and eukaryotes both have. Bacterial ribosomes are slightly smaller than yours, a difference antibiotics such as tetracycline exploit.'},
+      'ribosome-er':{tag:'Both cell types', title:'Ribosome (bound to rough ER)',
+        body:'Same machine as a free ribosome, but docked on the ER so the protein it builds threads straight into the ER as it is made — the start of the secretory pathway.'},
+      'flagellum':{tag:'Prokaryote', title:'Flagellum',
+        body:'A rigid corkscrew spun by a rotary protein motor set in the membrane — the only true wheel in biology. Simple does not mean immobile.'},
+      'pili':{tag:'Prokaryote', title:'Pili',
+        body:'Hair-like protein fibers that let a bacterium grip host tissue — the first step of most infections — and, in conjugation, pull two cells together so a plasmid can cross between them.'},
+      'virus':{tag:'Not a cell', title:'Bacteriophage (virus)',
+        body:'A protein coat around a strand of nucleic acid, and nothing else: no cytoplasm, no ribosomes, no metabolism. It cannot reproduce until it injects its DNA into a host — here, a bacterium — which is why viruses sit outside the definition of life even though they evolve.'},
+      'biofilm':{tag:'Prokaryote', title:'Biofilm',
+        body:'A community of bacteria stuck to a surface and buried in a slimy matrix of sugars and protein they secrete. The matrix shields them from antibiotics and immune cells, which is why infections on catheters, implants, and teeth resist drugs that kill free-floating cells.'},
+      'biofilm-cell':{tag:'Prokaryote', title:'Bacterium in a biofilm',
+        body:'Same species, same cell — but embedded in the matrix it tolerates antibiotic doses that would kill it on its own.'},
+      'fission':{tag:'Prokaryote', title:'Binary fission',
+        body:'How a bacterium divides: copy the circular chromosome, grow, pinch in two. No spindle, no mitosis — and under good conditions it takes about 20 minutes, which is how a few cells become millions in a day.'},
+      'membrane-euk':{tag:'Eukaryote', title:'Plasma membrane',
+        body:'Fluid mosaic: a bilayer studded with proteins, with no wall outside it in an animal cell. Surface carbohydrates act as identity markers — how your immune system tells your cells from an invader.'},
+      'nucleus':{tag:'Eukaryote', title:'Nucleus',
+        body:'A double membrane perforated by pores, enclosing linear chromosomes — the tangle inside. mRNA exits through the pores; DNA stays. This compartment is what “eukaryote” means.'},
+      'nucleolus':{tag:'Eukaryote', title:'Nucleolus',
+        body:'The dense region inside the nucleus where ribosomal RNA is made and ribosome subunits are assembled, before they ship out through the pores.'},
+      'rough-er':{tag:'Eukaryote', title:'Rough endoplasmic reticulum',
+        body:'“Rough” because it is studded with ribosomes. Proteins bound for secretion or for membranes are built here, fold inside it, and leave in vesicles for the Golgi — a cell that exports a lot of protein is packed with it.'},
+      'smooth-er':{tag:'Eukaryote', title:'Smooth endoplasmic reticulum',
+        body:'No ribosomes. It makes lipids and detoxifies drugs and alcohol — liver cells are full of it.'},
+      'golgi':{tag:'Eukaryote', title:'Golgi apparatus',
+        body:'Modifies, sorts, and packages proteins arriving from the ER, then ships them out in vesicles. The cell’s shipping department.'},
+      'vesicle':{tag:'Eukaryote', title:'Secretory vesicle',
+        body:'Watch it: budded from the rough ER, modified at the Golgi, then carried to the plasma membrane and released by exocytosis. Ribosome → ER → Golgi → vesicle → membrane is the route every secreted protein takes.'},
+      'lysosome':{tag:'Eukaryote', title:'Lysosome',
+        body:'Packed with hydrolytic enzymes that work at pH 5. Keeping them in their own compartment is the point of compartmentalization — loose in the cytoplasm they would digest the cell. Watch this one fuse with a swallowed bacterium.'},
+      'phagosome':{tag:'Eukaryote', title:'Phagocytosis',
+        body:'A white blood cell wraps its membrane around a bacterium and pulls it inside in a vesicle. A lysosome then fuses with that vesicle and digests the invader — bulk transport in, destruction in a sealed compartment.'},
+      'mito':{tag:'Eukaryote', title:'Mitochondrion',
+        body:'Double membrane, the inner one folded into cristae to pack in more electron-transport-chain surface for making ATP. Look inside: its own circular DNA and its own small ribosomes — a bacterium-like residue, the evidence for endosymbiosis.'},
+      'plant-wall':{tag:'Plant cell', title:'Cellulose cell wall',
+        body:'A rigid box of cellulose outside the membrane — it gives the plant cell its shape and is absent from animal cells. Different material from the bacterial wall (peptidoglycan) and the fungal wall (chitin).'},
+      'chloroplast':{tag:'Plant cell', title:'Chloroplast',
+        body:'Captures light energy in stacked thylakoid membranes (the discs). Like a mitochondrion it has a double membrane and its own circular DNA — a second engulfed prokaryote, in this case a photosynthetic one.'},
+      'vacuole':{tag:'Plant cell', title:'Central vacuole',
+        body:'A large water-filled sac that stores nutrients and waste and presses outward on the wall — that turgor pressure is what keeps a plant upright.'}
+    };
 
-    var pmem = capsule(2.15, 3.4, 0x2FB8A0, {opacity:0.45});
-    pmem.rotation.z = Math.PI/2;
-    pmem.children.forEach(function(c){ PICKABLE.push(c); c.userData.info =
-      {tag:'Prokaryote', title:'Plasma membrane', body:'A phospholipid bilayer, same basic architecture as yours. In bacteria it also carries out the electron transport chain, since there are no mitochondria.'}; });
-    pro.add(pmem);
+    /* ============================================================
+       PROKARYOTE (left)
+       ============================================================ */
+    var pro=new THREE.Group(); pro.position.x=-7.5; g.add(pro);
 
-    /* circular chromosome — a wobbly torus knot stands in for the nucleoid */
-    var chrom = new THREE.Mesh(new THREE.TorusKnotGeometry(1.0, 0.11, 120, 12, 2, 3), mat(0xE0417B,{rough:0.4}));
-    chrom.rotation.x = 0.6;
-    add(chrom, {tag:'Prokaryote', title:'Circular chromosome (nucleoid)',
-      body:'One circular DNA molecule, loose in the cytoplasm. No nuclear envelope — that absence is the single defining difference between prokaryotes and eukaryotes.'});
-    pro.add(chrom); PICKABLE.push(chrom);
+    var wall=capsule(2.5,3.4,0x7BC47F,{opacity:0.30}); wall.rotation.z=Math.PI/2; pro.add(wall);
+    reg('wall-pg', wall, INFO['wall-pg'], true);
+    var pmem=capsule(2.15,3.4,0x2FB8A0,{opacity:0.45}); pmem.rotation.z=Math.PI/2; pro.add(pmem);
+    reg('membrane-pro', pmem, INFO['membrane-pro'], true);
+
+    var chrom=new THREE.Mesh(new THREE.TorusKnotGeometry(1.0,0.11,120,12,2,3), mat(0xE0417B,{rough:0.4}));
+    chrom.rotation.x=0.6; pro.add(chrom); reg('nucleoid', chrom, INFO.nucleoid);
 
     for(var i=0;i<3;i++){
-      var pl = new THREE.Mesh(new THREE.TorusGeometry(0.33,0.055,10,28), mat(0xF0A73A,{rough:0.4}));
-      pl.position.set(-0.9+i*0.95, 1.1-i*0.5, 0.5);
-      pl.rotation.set(Math.random(),Math.random(),0);
-      pl.userData.info = {tag:'Prokaryote', title:'Plasmid',
-        body:'Small circular DNA separate from the chromosome. Plasmids carry antibiotic-resistance genes and can move between bacteria — even between species — which is why resistance spreads sideways, not just by descent.'};
-      pro.add(pl); PICKABLE.push(pl);
+      var pl=new THREE.Mesh(new THREE.TorusGeometry(0.36,0.09,10,28), mat(0xF0A73A,{rough:0.4}));
+      pl.position.set(-0.9+i*0.95, 1.1-i*0.5, 0.5); pl.rotation.set(i*0.9, i*1.3, 0);
+      pro.add(pl); reg('plasmid', pl, INFO.plasmid);
     }
     for(var r=0;r<14;r++){
-      var rb = ball(0.13, 0xB98BFF, 10);
+      var rb=ball(0.11,0xB98BFF,10);
       rb.position.set((Math.random()-0.5)*4.6,(Math.random()-0.5)*3.0,(Math.random()-0.5)*3.0);
-      rb.userData.info = {tag:'Both cell types', title:'Ribosome',
-        body:'Builds protein in every cell alive. Bacterial ribosomes are slightly smaller than yours — another difference antibiotics such as tetracycline exploit.'};
-      pro.add(rb); PICKABLE.push(rb);
+      pro.add(rb); reg('ribosome', rb, INFO.ribosome);
     }
-    var flag = rod(0.07, 4.2, 0x7BC47F);
-    flag.position.set(-4.6,0,0); flag.rotation.z = Math.PI/2;
-    flag.userData.info = {tag:'Prokaryote', title:'Flagellum',
-      body:'A rotating protein motor for movement. Simple does not mean immobile.'};
-    pro.add(flag); PICKABLE.push(flag);
+    var flag=helixTube(3.6,3,0.28,0.11,0x7BC47F); flag.position.x=-7.9; pro.add(flag);
+    reg('flagellum', flag, INFO.flagellum);
 
-    /* ---------- eukaryote (right) ---------- */
-    var euk = new THREE.Group(); euk.position.x = 6.5; g.add(euk);
+    var piliGrp=new THREE.Group();
+    for(var p=0;p<10;p++){
+      var a=p/10*Math.PI*2, px=-1.4+(p%3)*1.4;
+      var dir=new THREE.Vector3(0, Math.cos(a), Math.sin(a));
+      var pil=rod(0.055,0.7,0xD9D2E6);
+      pil.position.set(px, dir.y*2.85, dir.z*2.85);
+      pil.quaternion.setFromUnitVectors(UP, dir);
+      piliGrp.add(pil);
+    }
+    pro.add(piliGrp); reg('pili', piliGrp, INFO.pili);
 
-    var emem = ball(5.2, 0x2FB8A0, 40, {opacity:0.20, side:THREE.DoubleSide});
-    emem.userData.info = {tag:'Eukaryote', title:'Plasma membrane',
-      body:'Fluid mosaic: a bilayer studded with proteins, with no wall outside it. Surface carbohydrates act as identity markers — how your immune system tells your cells from an invader.'};
-    euk.add(emem); PICKABLE.push(emem);
+    /* bacteriophage landing on the wall */
+    var phage=new THREE.Group();
+    var head=ball(0.34,0x9B5FE0,14); head.position.y=0.95; phage.add(head);
+    var neck=rod(0.06,0.18,0xB98BFF); neck.position.y=0.62; phage.add(neck);
+    var tailV=rod(0.075,0.55,0xB98BFF); tailV.position.y=0.27; phage.add(tailV);
+    var base=new THREE.Mesh(new THREE.CylinderGeometry(0.16,0.16,0.06,12), mat(0x6B4BA8)); phage.add(base);
+    for(var lg=0;lg<6;lg++){
+      var la=lg/6*Math.PI*2;
+      var leg=rod(0.022,0.42,0xB98BFF);
+      leg.position.set(Math.cos(la)*0.17, -0.12, Math.sin(la)*0.17);
+      leg.quaternion.setFromUnitVectors(UP, new THREE.Vector3(Math.cos(la)*0.55, -1, Math.sin(la)*0.55).normalize());
+      phage.add(leg);
+    }
+    phage.position.set(1.0, 2.62, 0.55); pro.add(phage);
+    reg('virus', phage, INFO.virus);
 
-    var nuc = ball(1.9, 0x6B4BA8, 32);
-    nuc.userData.info = {tag:'Eukaryote', title:'Nucleus',
-      body:'A double membrane perforated by pores, enclosing linear chromosomes. mRNA exits; DNA stays. This compartment is what "eukaryote" means.'};
-    euk.add(nuc); PICKABLE.push(nuc);
-    var nucl = ball(0.75, 0xE0417B, 20); nucl.position.set(0.5,0.3,0.4);
-    nucl.userData.info = {tag:'Eukaryote', title:'Nucleolus',
-      body:'Dense region inside the nucleus where ribosome subunits are assembled.'};
-    euk.add(nucl); PICKABLE.push(nucl);
+    /* ---------- biofilm on a surface, one cell dividing ---------- */
+    var bio=new THREE.Group(); bio.position.set(-9.6,-5.4,-1.8); g.add(bio);
+    var surf=new THREE.Mesh(new THREE.BoxGeometry(3.6,0.12,2.4), mat(0xD9D2E6,{rough:0.9})); surf.position.y=-0.5; bio.add(surf);
+    var matrix=ball(1,0x7BC47F,24,{opacity:0.22}); matrix.scale.set(1.7,0.7,1.15); bio.add(matrix);
+    reg('biofilm', matrix, INFO.biofilm, true);
+    var bioCells=new THREE.Group(); bio.add(bioCells);
+    [[-0.9,-0.1,0.3,0.4],[-0.3,0.15,-0.4,-0.6],[0.5,-0.15,-0.2,0.9],[1.0,0.1,0.4,0.2]].forEach(function(c){
+      var bc=capsule(0.17,0.4,0x2FB8A0); bc.position.set(c[0],c[1],c[2]); bc.rotation.set(0,c[3],Math.PI/2); bioCells.add(bc);
+    });
+    reg('biofilm-cell', bioCells, INFO['biofilm-cell']);
+    var fisGrp=new THREE.Group(); fisGrp.position.set(0.1,-0.05,0.55); bio.add(fisGrp);
+    var fisA=capsule(0.17,0.4,0x2FB8A0); fisA.rotation.z=Math.PI/2; fisGrp.add(fisA);
+    var fisB=capsule(0.17,0.4,0x2FB8A0); fisB.rotation.z=Math.PI/2; fisB.visible=false; fisGrp.add(fisB);
+    reg('fission', fisGrp, INFO.fission);
 
-    var mitoInfo = {tag:'Eukaryote', title:'Mitochondrion',
-      body:'Double membrane, inner one folded into cristae to maximize surface area for the electron transport chain. Its own circular DNA and its own ribosomes are the evidence for endosymbiosis.'};
+    /* ============================================================
+       EUKARYOTE (right) — animal by default, plant on toggle
+       ============================================================ */
+    var euk=new THREE.Group(); euk.position.x=6.5; g.add(euk);
+
+    var emem=ball(5.2,0x2FB8A0,40,{opacity:0.20,side:THREE.DoubleSide}); euk.add(emem);
+    reg('membrane-euk', emem, INFO['membrane-euk'], true);
+
+    /* nucleus: translucent envelope with pores, chromatin tangle, nucleolus */
+    var nuc=new THREE.Group(); euk.add(nuc);
+    var env=ball(1.9,0x6B4BA8,32,{opacity:0.42,side:THREE.DoubleSide}); nuc.add(env);
+    var chromatin=new THREE.Mesh(new THREE.TorusKnotGeometry(0.85,0.09,120,8,3,4), mat(0x9B5FE0)); nuc.add(chromatin);
+    for(var po=0;po<8;po++){
+      var pd=new THREE.Vector3(Math.sin(po*1.7)*0.9, Math.cos(po*2.3), Math.sin(po*0.9+1)*0.8).normalize();
+      var pore=new THREE.Mesh(new THREE.TorusGeometry(0.17,0.045,6,14), mat(0xEFE9F7));
+      pore.position.copy(pd).multiplyScalar(1.9);
+      pore.quaternion.setFromUnitVectors(FWD, pd);
+      nuc.add(pore);
+    }
+    reg('nucleus', nuc, INFO.nucleus); env.userData.passThrough=true;
+    var nucl=ball(0.55,0xE0417B,20); nucl.position.set(0.65,0.35,0.45); euk.add(nucl);
+    reg('nucleolus', nucl, INFO.nucleolus);
+
+    /* mitochondria with cristae, their own DNA and ribosomes */
+    function mitochondrion(){
+      var grp=new THREE.Group();
+      grp.add(capsule(0.46,1.0,0xF0A73A,{opacity:0.38}));
+      grp.add(capsule(0.33,0.9,0xF0A73A,{opacity:0.5}));
+      for(var k=0;k<5;k++){ var c=new THREE.Mesh(new THREE.CylinderGeometry(0.3,0.3,0.035,16), mat(0xB8842A)); c.position.y=-0.44+k*0.22; grp.add(c); }
+      var dna=new THREE.Mesh(new THREE.TorusGeometry(0.11,0.025,6,16), mat(0xE0417B)); dna.position.set(0.1,0.1,0.05); dna.rotation.x=1.1; grp.add(dna);
+      for(var q=0;q<3;q++){ var mr=ball(0.045,0xB98BFF,6); mr.position.set(-0.12+q*0.1,-0.25+q*0.2,0.12); grp.add(mr); }
+      return grp;
+    }
     for(var m=0;m<4;m++){
-      var mi = capsule(0.42, 1.0, 0xF0A73A);
-      var ang = m*1.9;
+      var mi=mitochondrion(), ang=m*1.9;
       mi.position.set(Math.cos(ang)*3.2, Math.sin(ang)*2.3, Math.sin(ang*1.7)*2.2);
       mi.rotation.set(ang, ang*0.7, 0.4);
-      mi.children.forEach(function(c){ c.userData.info = mitoInfo; PICKABLE.push(c); });
-      euk.add(mi);
+      euk.add(mi); reg('mito', mi, INFO.mito);
     }
-    var er = new THREE.Mesh(new THREE.TorusGeometry(2.9,0.20,10,60,Math.PI*1.35), mat(0x8FA8E8));
-    er.rotation.set(1.2,0.4,0);
-    er.userData.info = {tag:'Eukaryote', title:'Rough endoplasmic reticulum',
-      body:'Studded with ribosomes. Proteins are synthesized here, fold inside it, and leave in vesicles bound for the Golgi.'};
-    euk.add(er); PICKABLE.push(er);
 
-    var golgi = new THREE.Group();
-    for(var gi=0; gi<4; gi++){
-      var disc = new THREE.Mesh(new THREE.TorusGeometry(1.0-gi*0.13, 0.10, 8, 30), mat(0xE87FB0));
-      disc.position.y = gi*0.30; disc.rotation.x = Math.PI/2;
-      golgi.add(disc); PICKABLE.push(disc);
-      disc.userData.info = {tag:'Eukaryote', title:'Golgi apparatus',
-        body:'Modifies, sorts, and packages proteins arriving from the ER, then ships them out in vesicles. The cell\u2019s shipping department.'};
+    /* rough ER (studded) and smooth ER (bare) */
+    var erRot=new THREE.Euler(1.2,0.4,0);
+    var er=new THREE.Mesh(new THREE.TorusGeometry(2.9,0.20,10,60,Math.PI*1.35), mat(0x8FA8E8));
+    er.rotation.copy(erRot); euk.add(er); reg('rough-er', er, INFO['rough-er']);
+    var studs=new THREE.Group(); studs.rotation.copy(erRot); euk.add(studs);
+    for(var s=0;s<18;s++){
+      var th=(s+0.5)/18*Math.PI*1.35, sr=ball(0.1,0xB98BFF,8);
+      if(s%3===0) sr.position.set(3.18*Math.cos(th),3.18*Math.sin(th),0);
+      else sr.position.set(2.9*Math.cos(th),2.9*Math.sin(th), s%3===1?0.28:-0.28);
+      studs.add(sr);
     }
-    golgi.position.set(-2.6,-2.0,1.0); golgi.rotation.z = 0.3;
-    euk.add(golgi);
+    reg('ribosome', studs, INFO['ribosome-er']);
+    var ser=new THREE.Mesh(new THREE.TorusGeometry(2.9,0.17,10,50,Math.PI*0.5), mat(0xB5C4F0));
+    ser.rotation.copy(erRot); ser.rotateZ(Math.PI*1.42); euk.add(ser); reg('smooth-er', ser, INFO['smooth-er']);
 
-    var lyso = ball(0.62, 0x9B5FE0, 20); lyso.position.set(2.4,-2.6,1.4);
-    lyso.userData.info = {tag:'Eukaryote', title:'Lysosome',
-      body:'Packed with hydrolytic enzymes at pH 5. Digests worn organelles — and any bacterium a white blood cell has just swallowed by phagocytosis.'};
-    euk.add(lyso); PICKABLE.push(lyso);
+    var golgi=new THREE.Group();
+    for(var gi=0;gi<4;gi++){
+      var disc=new THREE.Mesh(new THREE.TorusGeometry(1.0-gi*0.13,0.10,8,30), mat(0xE87FB0));
+      disc.position.y=gi*0.30; disc.rotation.x=Math.PI/2; golgi.add(disc);
+    }
+    golgi.position.set(-2.6,-2.0,1.0); golgi.rotation.z=0.3; euk.add(golgi);
+    reg('golgi', golgi, INFO.golgi);
 
-    for(var er2=0; er2<10; er2++){
-      var rb2 = ball(0.13, 0xB98BFF, 10);
+    var lysoHome=new THREE.Vector3(2.4,-2.6,1.4);
+    var lyso=ball(0.62,0x9B5FE0,20); lyso.position.copy(lysoHome); euk.add(lyso);
+    reg('lysosome', lyso, INFO.lysosome);
+
+    for(var f=0;f<10;f++){
+      var rb2=ball(0.12,0xB98BFF,10);
       rb2.position.set((Math.random()-0.5)*7,(Math.random()-0.5)*7,(Math.random()-0.5)*6);
-      if(rb2.position.length()<2.4) rb2.position.multiplyScalar(2.2);
-      rb2.userData.info = {tag:'Both cell types', title:'Ribosome',
-        body:'Present in every cell, prokaryote and eukaryote alike — one of the features shared across all life.'};
-      euk.add(rb2); PICKABLE.push(rb2);
+      if(rb2.position.length()<2.6) rb2.position.multiplyScalar(2.2);
+      if(rb2.position.length()>4.6) rb2.position.setLength(4.4);
+      euk.add(rb2); reg('ribosome', rb2, INFO.ribosome);
     }
 
-    this._pro = pro; this._euk = euk;
+    /* secretory vesicle: rough ER -> Golgi -> membrane */
+    var vP0=new THREE.Vector3(2.9*Math.cos(0.6),2.9*Math.sin(0.6),0).applyEuler(erRot);
+    var vP1=new THREE.Vector3(-2.6,-1.4,1.0);
+    var vP2=vP1.clone().normalize().multiplyScalar(5.05);
+    var vesicle=ball(0.24,0xE87FB0,12); vesicle.position.copy(vP0); euk.add(vesicle);
+    reg('vesicle', vesicle, INFO.vesicle);
+
+    /* phagocytosis: a bacterium is swallowed, then the lysosome fuses with it */
+    var phA=new THREE.Vector3(-6.9,2.3,0.9), phB=new THREE.Vector3(-5.05,1.65,0.7), phC=new THREE.Vector3(-3.4,1.2,0.6);
+    var phGrp=new THREE.Group(); euk.add(phGrp);
+    var phBac=capsule(0.28,0.55,0x7BC47F); phBac.rotation.z=0.6; phBac.position.copy(phA); phGrp.add(phBac);
+    var phVes=ball(0.6,0x2FB8A0,16,{opacity:0.3}); phVes.position.copy(phC); phVes.visible=false; phGrp.add(phVes);
+    reg('phagosome', phGrp, INFO.phagosome); phVes.userData.passThrough=true;
+
+    /* plant-only structures, hidden until toggled */
+    var plant=new THREE.Group(); plant.visible=false; euk.add(plant);
+    var pwall=new THREE.Mesh(new THREE.BoxGeometry(12.6,12.6,12.6), mat(0x7BC47F,{opacity:0.15,side:THREE.DoubleSide})); plant.add(pwall);
+    reg('plant-wall', pwall, INFO['plant-wall'], true);
+    var pmem2=new THREE.Mesh(new THREE.BoxGeometry(11.4,11.4,11.4), mat(0x2FB8A0,{opacity:0.18,side:THREE.DoubleSide})); plant.add(pmem2);
+    reg('membrane-euk', pmem2, INFO['membrane-euk'], true);
+    var vac=ball(2.7,0x8FA8E8,28,{opacity:0.32}); vac.position.set(1.4,2.4,-2.6); plant.add(vac);
+    reg('vacuole', vac, INFO.vacuole);
+    [[-3.6,2.0,2.2],[3.3,2.6,1.6],[0.8,-3.6,-2.4]].forEach(function(cp,ci){
+      var ch=new THREE.Group();
+      var body=ball(1,0x7BC47F,20,{opacity:0.72}); body.scale.set(1.1,0.55,0.7); ch.add(body);
+      for(var gr=0;gr<3;gr++){ var gd=new THREE.Mesh(new THREE.CylinderGeometry(0.3,0.3,0.07,14), mat(0x3F9F6B)); gd.position.set(-0.45+gr*0.45,0,0); ch.add(gd); }
+      ch.position.set(cp[0],cp[1],cp[2]); ch.rotation.set(ci*0.7,ci*1.1,0.3);
+      plant.add(ch); reg('chloroplast', ch, INFO.chloroplast);
+    });
+
+    self._parts={pro:pro, euk:euk, flag:flag, emem:emem, plant:plant, vesicle:vesicle, vP0:vP0, vP1:vP1, vP2:vP2,
+      lyso:lyso, lysoHome:lysoHome, phBac:phBac, phVes:phVes, phA:phA, phB:phB, phC:phC, fisA:fisA, fisB:fisB, phage:phage};
+
+    /* ---------- selection highlight / plant toggle ---------- */
+    function highlight(keys){
+      self._glow.forEach(function(mm){ mm.material.emissive.setHex(0x000000); mm.material.emissiveIntensity=1; });
+      self._glow=[];
+      keys.forEach(function(k){ (REG[k]||[]).forEach(function(obj){ obj.traverse(function(o){
+        if(o.isMesh && o.material && o.material.emissive){ o.material.emissive.setHex(0xFFE2EE); self._glow.push(o); }
+      }); }); });
+    }
+    function setPlant(on){
+      self._plant=on; plant.visible=on; emem.visible=!on;
+      plantBtn.textContent = on ? 'Switch to animal cell' : 'Switch to plant cell';
+    }
+    self._highlight=highlight; self._setPlant=setPlant;
+
+    /* ---------- guided tour ---------- */
+    var STOPS=[
+      {tag:'Overview', focus:null, r:20, keys:[], title:'Two kinds of cells',
+       body:'Left: a bacterium, a prokaryote. Right: one of your cells, a eukaryote. Both are alive — they grow, use energy, respond, reproduce, and keep order inside a membrane — but only one has a nucleus. Real scale is more extreme than drawn here: bacteria are about 1–10 µm across, your cells 10–100 µm.'},
+      {tag:'Eukaryote', focus:'nucleus', r:9, keys:['nucleus','nucleolus'], title:'The defining difference: a nucleus',
+       body:'A double membrane perforated by pores keeps the linear chromosomes in one compartment. Inside it, the dense nucleolus assembles ribosome subunits. Nothing like this exists in the bacterium — “eukaryote” literally means “true nucleus.”'},
+      {tag:'Prokaryote', focus:'nucleoid', r:10, keys:['nucleoid','plasmid'], title:'DNA with no nucleus',
+       body:'The bacterium keeps one circular chromosome loose in its cytoplasm — the nucleoid region, with no membrane around it. The small rings are plasmids: extra DNA circles that can carry antibiotic-resistance genes from one bacterium to another.'},
+      {tag:'Both cell types', focus:null, r:20, keys:['ribosome'], title:'Ribosomes: in every cell alive',
+       body:'Every glowing dot is a ribosome, and both cells are full of them, because every cell builds protein. They are the structure prokaryotes and eukaryotes share. Bacterial ribosomes are a little smaller — a difference antibiotics like tetracycline exploit without harming yours.'},
+      {tag:'Prokaryote', focus:'wall-pg', r:11, keys:['wall-pg','pili'], title:'The wall antibiotics attack',
+       body:'Outside the bacterial membrane is a rigid peptidoglycan wall. Your cells have no wall, so penicillin — which blocks the enzyme that cross-links peptidoglycan — bursts bacteria and leaves you alone. The fine hairs are pili, used to grip host tissue: adhesion is how most infections begin.'},
+      {tag:'Eukaryote', focus:'golgi', r:9, keys:['rough-er','golgi','vesicle'], title:'The protein export line',
+       body:'Follow the moving vesicle. Ribosomes on the rough ER build the protein; the Golgi modifies, sorts, and packages it; a vesicle carries it to the membrane and releases it by exocytosis. The bare tube beside the rough ER is smooth ER — no ribosomes, it makes lipids and detoxifies drugs.'},
+      {tag:'Eukaryote', focus:'lysosome', r:9, keys:['lysosome','phagosome'], title:'Compartments, and swallowing a bacterium',
+       body:'A lysosome holds digestive enzymes that work at pH 5 — sealed off, because loose in the cytoplasm they would digest the cell. That is the advantage of compartments: incompatible reactions run side by side. Watch the lysosome fuse with a bacterium the cell has just engulfed by phagocytosis.'},
+      {tag:'Eukaryote', focus:'mito', r:7, keys:['mito'], title:'Mitochondria: former bacteria',
+       body:'Two membranes, the inner one folded into cristae — more surface for the electron transport chain that makes ATP. Look inside: a circular DNA ring and small ribosomes, just like the bacterium on the left. Mitochondria even divide by fission. That is the evidence for endosymbiosis.'},
+      {tag:'Prokaryote', focus:'fission', r:9, keys:['fission','biofilm'], title:'How bacteria spread and resist',
+       body:'The cell at the edge is dividing by binary fission — copy the chromosome, pinch in two, no mitosis. Bacteria cause disease by multiplying this fast, damaging tissue, and releasing toxins (not by inserting DNA into your nucleus — that is a virus trick). Stuck to a surface in a slimy biofilm, they also shrug off antibiotics.'},
+      {tag:'Not a cell', focus:'virus', r:7, keys:['virus'], title:'A virus is not a cell',
+       body:'This bacteriophage is a protein coat around DNA — no cytoplasm, no ribosomes, no metabolism. It cannot reproduce until it injects its DNA into a host cell and hijacks the host’s ribosomes. Viruses evolve, but they fail the cell and metabolism tests for life.'},
+      {tag:'Plant cell', focus:'chloroplast', r:10, keys:['plant-wall','chloroplast','vacuole'], plant:true, title:'What a plant cell adds',
+       body:'Same eukaryotic plan, three additions: a rigid cellulose wall outside the membrane (absent from animal cells), chloroplasts that capture light in stacked thylakoids — with their own DNA, like mitochondria — and a large central vacuole whose pressure keeps the plant upright.'}
+    ];
+    self._STOPS=STOPS;
+    function applyStop(i){
+      self._stop=i;
+      if(i<0){
+        highlight([]); self._focusObj=null; self._focusPt=new THREE.Vector3(0,0,0); self._focusR=20; self._sel=null;
+        setPlant(false); hideInfo(); tourBtn.textContent='Tour ▶'; return;
+      }
+      var st=STOPS[i];
+      setPlant(!!st.plant);
+      highlight(st.keys);
+      self._sel=null;
+      if(st.focus){ self._focusObj=REG[st.focus][0]; self._focusPt=null; }
+      else { self._focusObj=null; self._focusPt=new THREE.Vector3(0,0,0); }
+      self._focusR=st.r;
+      self._stopPanel={tag:'Tour '+(i+1)+'/'+STOPS.length+' · '+st.tag, title:st.title, body:st.body};
+      showInfo(self._stopPanel);
+      tourBtn.textContent='Tour '+(i+1)+'/'+STOPS.length+' ▶';
+    }
+    self._applyStop=applyStop;
+
+    /* ---------- quiz ---------- */
+    var QUIZ=[
+      {q:'Click the structure that eukaryotes have and prokaryotes lack — the one that encloses the DNA.', keys:['nucleus'],
+       ok:'The nucleus: a double membrane with pores around linear chromosomes. Prokaryotic DNA just sits in the cytoplasm.', hint:'It is the large compartment in the middle of the cell on the right.'},
+      {q:'Click something found in BOTH cell types — every living cell has these.', keys:['ribosome'],
+       ok:'Ribosomes. All cells build protein, so all cells have them; bacterial ones are just smaller.', hint:'Think of the small dots scattered through both cells.'},
+      {q:'Click the layer made of peptidoglycan — the one penicillin attacks.', keys:['wall-pg'],
+       ok:'The bacterial cell wall. Your cells have no wall, which is why penicillin spares them.', hint:'It is the outermost layer of the bacterium on the left.'},
+      {q:'Click the prokaryote’s chromosome.', keys:['nucleoid'],
+       ok:'One circular chromosome, loose in the cytoplasm with no envelope — the nucleoid.', hint:'Look for the large loop inside the bacterium.'},
+      {q:'Click the small DNA loop that can carry antibiotic resistance from one bacterium to another.', keys:['plasmid'],
+       ok:'A plasmid. Resistance genes ride on these and spread sideways between cells, even across species.', hint:'Small rings inside the bacterium, separate from the big chromosome.'},
+      {q:'Click where ribosome subunits are assembled.', keys:['nucleolus'],
+       ok:'The nucleolus, the dense body inside the nucleus.', hint:'It sits inside the nucleus of the cell on the right.'},
+      {q:'Click the organelle that modifies, sorts, and packages proteins for delivery.', keys:['golgi'],
+       ok:'The Golgi apparatus — the shipping department.', hint:'A stack of flattened discs near the edge of the animal cell.'},
+      {q:'Click the ER that is “rough” because it is studded with ribosomes.', keys:['rough-er'],
+       ok:'Rough ER. Proteins for export are built on its ribosomes and fold inside it.', hint:'The long curved tube with dots on it — click the tube itself, not a dot.'},
+      {q:'Click the organelle that makes lipids and detoxifies drugs and alcohol.', keys:['smooth-er'],
+       ok:'Smooth ER: no ribosomes, lots of lipid synthesis and detox. Liver cells are full of it.', hint:'A bare curved tube next to the rough ER, with no dots.'},
+      {q:'Click the organelle whose inner membrane is folded into cristae.', keys:['mito'],
+       ok:'A mitochondrion. Cristae pack in surface area for the electron transport chain.', hint:'The orange, bean-shaped organelles with discs inside.'},
+      {q:'Click the compartment that keeps pH-5 digestive enzymes away from the rest of the cell.', keys:['lysosome'],
+       ok:'The lysosome. Compartmentalization lets it digest without digesting the cell.', hint:'A purple sphere near the lower edge of the animal cell — it moves when it fuses with a phagosome.'},
+      {q:'Click the thing in this scene that is NOT alive — no cells, no metabolism.', keys:['virus'],
+       ok:'The bacteriophage. Protein coat, nucleic acid, nothing else — it needs a host to reproduce.', hint:'Look on top of the bacterium for something with legs.'},
+      {q:'Click the protective community that shields bacteria from antibiotics.', keys:['biofilm','biofilm-cell'],
+       ok:'A biofilm: bacteria embedded in a secreted matrix on a surface.', hint:'Lower left, a slimy mound on a flat surface.'},
+      {q:'Click the cell that is dividing by binary fission.', keys:['fission'],
+       ok:'Binary fission — copy the chromosome, pinch in two. No spindle, no mitosis.', hint:'In the biofilm, one cell keeps stretching and splitting.'},
+      {q:'Click the structure that gives a plant cell its rigid shape.', keys:['plant-wall'], plant:true,
+       ok:'The cellulose cell wall — outside the membrane, absent from animal cells.', hint:'The green box around the whole plant cell.'},
+      {q:'Click the organelle with its own DNA that captures light energy.', keys:['chloroplast'], plant:true,
+       ok:'A chloroplast: stacked thylakoids, double membrane, its own DNA — another endosymbiont.', hint:'Green ovals with dark discs inside, in the plant cell.'}
+    ];
+    function startQuiz(){
+      var items=QUIZ.filter(function(it){ return !it.plant || self._plant; }).slice();
+      for(var k=items.length-1;k>0;k--){ var j=Math.floor(Math.random()*(k+1)); var tmp=items[k]; items[k]=items[j]; items[j]=tmp; }
+      items=items.slice(0,10);
+      self._quiz={items:items, idx:0, score:0, answered:false, nextAt:null};
+      self._focusObj=null; self._sel=null; highlight([]);
+      showPrompt();
+    }
+    function showPrompt(){
+      var qz=self._quiz, it=qz.items[qz.idx];
+      qz.answered=false; qz.nextAt=null; highlight([]);
+      showInfo({tag:'Quiz '+(qz.idx+1)+'/'+qz.items.length+' · score '+qz.score, title:it.q, body:'Click the structure in the 3D scene. Drag to rotate if you need a better view.'});
+      quizBtn.textContent='Skip ▶ ('+(qz.idx+1)+'/'+qz.items.length+')';
+    }
+    function endQuiz(){
+      var qz=self._quiz, n=qz.items.length, sc=qz.score;
+      var msg = sc===n ? 'Perfect. You can find every structure Levels 4–5 test.'
+              : sc>=n*0.7 ? 'Solid. Take the Tour for the ones you missed, then try again.'
+              : 'Take the Tour — it walks through every one of these — then quiz again.';
+      showInfo({tag:'Quiz complete', title:sc+' / '+n+' correct', body:msg});
+      self._quiz=null; quizBtn.textContent='Quiz me'; highlight([]);
+    }
+    self._quizNext=function(){
+      var qz=self._quiz; qz.idx++;
+      if(qz.idx>=qz.items.length) endQuiz(); else showPrompt();
+    };
+
+    /* ---------- bar controls ---------- */
+    var tourBtn=document.getElementById('cellTour');
+    if(!tourBtn){
+      tourBtn=document.createElement('button'); tourBtn.id='cellTour'; tourBtn.className='btn';
+      document.getElementById('bar').insertBefore(tourBtn, document.getElementById('lvl'));
+    }
+    tourBtn.setAttribute('data-model-ui','cells'); tourBtn.textContent='Tour ▶';
+    tourBtn.onclick=function(){
+      if(self._quiz){ self._quiz=null; quizBtn.textContent='Quiz me'; }
+      var n=self._stop+1; if(n>=STOPS.length) n=-1;
+      applyStop(n);
+    };
+    var quizBtn=document.getElementById('cellQuiz');
+    if(!quizBtn){
+      quizBtn=document.createElement('button'); quizBtn.id='cellQuiz'; quizBtn.className='btn ghost';
+      document.getElementById('bar').insertBefore(quizBtn, document.getElementById('lvl'));
+    }
+    quizBtn.setAttribute('data-model-ui','cells'); quizBtn.textContent='Quiz me';
+    quizBtn.onclick=function(){
+      if(self._quiz){ self._quizNext(); return; }
+      if(self._stop>=0){ self._stop=-1; tourBtn.textContent='Tour ▶'; }
+      self._focusPt=null; self._focusObj=null;
+      startQuiz();
+    };
+    var plantBtn=document.getElementById('cellPlant');
+    if(!plantBtn){
+      plantBtn=document.createElement('button'); plantBtn.id='cellPlant'; plantBtn.className='btn ghost';
+      document.getElementById('bar').insertBefore(plantBtn, document.getElementById('lvl'));
+    }
+    plantBtn.setAttribute('data-model-ui','cells');
+    plantBtn.onclick=function(){ setPlant(!self._plant); };
+    setPlant(false);
   },
+
+  /* a click in the scene: quiz answers, otherwise focus + highlight the structure */
+  onPick:function(info){
+    var self=this;
+    if(self._quiz){
+      var qz=self._quiz, it=qz.items[qz.idx];
+      if(!info || qz.answered) return false;
+      if(it.keys.indexOf(info.key)>=0){
+        qz.score++; qz.answered=true; qz.nextAt=performance.now()*0.001+3.2;
+        self._highlight([info.key]);
+        showInfo({tag:'Correct · '+(qz.idx+1)+'/'+qz.items.length+' · score '+qz.score, title:info.title, body:it.ok});
+      } else {
+        showInfo({tag:'Not quite · '+(qz.idx+1)+'/'+qz.items.length, title:'That is the '+info.title.toLowerCase(), body:it.hint+' Try again.'});
+      }
+      return false;
+    }
+    if(info){
+      self._sel=info.key; self._highlight([info.key]);
+      self._focusObj=(self._reg[info.key]||[null])[0]; self._focusPt=null;
+      return true;
+    }
+    /* empty click during a tour stop brings the stop's narrative back instead of hiding the panel */
+    if(self._stop>=0 && self._stopPanel){
+      self._sel=null; self._highlight(self._STOPS[self._stop].keys); showInfo(self._stopPanel); return false;
+    }
+    self._sel=null; self._highlight([]); self._focusObj=null;
+    return true;
+  },
+  onReset:function(){
+    this._sel=null; this._focusObj=null; this._focusPt=null; this._focusR=null;
+    if(this._highlight) this._highlight([]);
+  },
+
   tick:function(t){
-    if(this._pro) this._pro.rotation.y = Math.sin(t*0.16)*0.22;
-    if(this._euk) this._euk.rotation.y = t*0.055;
+    var self=this, P=self._parts; if(!P) return;
+    var dt = self._lastT===undefined ? 0 : Math.min(0.05, t-self._lastT); self._lastT=t;
+    /* organelle animations run on their own clock, frozen during a quiz so targets hold still */
+    if(!self._quiz) self._animT += dt;
+    var at=self._animT, k=1-Math.exp(-dt*9);
+
+    /* the animal cell turns slowly unless something is being looked at */
+    var paused = !!(self._focusObj || self._sel || self._quiz);
+    if(!paused) self._ang += dt*0.055;
+    P.euk.rotation.y=self._ang;
+    P.pro.rotation.y=Math.sin(t*0.16)*0.22;
+    P.flag.rotation.x=t*10;
+    P.phage.position.y=2.62+Math.sin(t*2)*0.04;
+
+    /* camera focus */
+    var dest=null;
+    if(self._focusObj) dest=self._focusObj.getWorldPosition(self._tmp);
+    else if(self._focusPt) dest=self._focusPt;
+    if(dest) orbit.target.lerp(dest, k);
+    if(self._focusR!==null && self._focusR!==undefined){
+      orbit.radius += (self._focusR-orbit.radius)*k;
+      if(Math.abs(self._focusR-orbit.radius)<0.05){ orbit.radius=self._focusR; self._focusR=null; }
+      orbit.apply();
+    } else if(dest) orbit.apply();
+
+    /* highlight pulse */
+    var glow=0.22+0.16*Math.sin(t*5);
+    for(var i=0;i<self._glow.length;i++) self._glow[i].material.emissiveIntensity=glow;
+
+    /* secretory vesicle: ER -> Golgi (modified) -> membrane (fuses) */
+    var ph=(at%7)/7, v=P.vesicle;
+    if(ph<0.38){ v.position.lerpVectors(P.vP0,P.vP1,ph/0.38); v.scale.setScalar(1); v.material.color.setHex(0xE87FB0); }
+    else if(ph<0.5){ v.position.copy(P.vP1); v.material.color.setHex(0xF0A73A); }
+    else if(ph<0.88){ v.position.lerpVectors(P.vP1,P.vP2,(ph-0.5)/0.38); }
+    else if(ph<0.97){ v.position.copy(P.vP2); v.scale.setScalar(Math.max(0.01,1-(ph-0.88)/0.09)); }
+    else { v.position.copy(P.vP0); v.scale.setScalar(Math.max(0.01,(ph-0.97)/0.03)); v.material.color.setHex(0xE87FB0); }
+
+    /* phagocytosis: approach, engulf, lysosome fuses, bacterium digested, reset */
+    var pp=(at%9)/9, b=P.phBac, ves=P.phVes, ly=P.lyso;
+    if(pp<0.3){ b.position.lerpVectors(P.phA,P.phB,pp/0.3); b.scale.setScalar(1); ves.visible=false; ly.position.copy(P.lysoHome); }
+    else if(pp<0.5){ var u=(pp-0.3)/0.2; b.position.lerpVectors(P.phB,P.phC,u); ves.visible=true; ves.position.copy(b.position); ves.scale.setScalar(0.3+0.7*u); ly.position.copy(P.lysoHome); }
+    else if(pp<0.72){ ly.position.lerpVectors(P.lysoHome,P.phC,(pp-0.5)/0.22); b.position.copy(P.phC); ves.position.copy(P.phC); ves.scale.setScalar(1); }
+    else if(pp<0.88){ var d=(pp-0.72)/0.16; ly.position.copy(P.phC); b.scale.setScalar(Math.max(0.05,1-d)); ves.scale.setScalar(1-0.5*d); }
+    else { var w=(pp-0.88)/0.12; ly.position.lerpVectors(P.phC,P.lysoHome,w); ves.visible=false; b.position.copy(P.phA); b.scale.setScalar(Math.max(0.05,w)); }
+
+    /* binary fission in the biofilm */
+    var fp=(at%5)/5, A=P.fisA, B=P.fisB;
+    if(fp<0.45){ A.scale.y=1+1.1*(fp/0.45); A.position.x=0; B.visible=false; }
+    else if(fp<0.55){ A.scale.y=2.1; B.visible=true; B.scale.y=0.9; B.position.x=0.25; A.position.x=-0.25; }
+    else if(fp<0.9){ var s=(fp-0.55)/0.35; A.scale.y=2.1-1.1*s; A.position.x=-0.25-0.35*s; B.scale.y=0.9+0.1*s; B.position.x=0.25+0.35*s; }
+    else { B.visible=false; A.scale.y=1; A.position.x=0; }
+
+    /* quiz: advance after a correct answer */
+    if(self._quiz && self._quiz.nextAt!==null && t>=self._quiz.nextAt) self._quizNext();
   }
 });
 
