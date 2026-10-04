@@ -3279,6 +3279,228 @@ MODELS.push({
   }
 });
 
+/* ============================================================
+   MODEL 10 — The Web: Biodiversity & Cascade (Levels 32–33, 38–39)
+   A 3D food web of 13 species (producers low, apex high) joined by
+   five link types; node size tracks population in a live simulation.
+   Click a species once to read about it, again to remove it and watch
+   the cascade. A "Remove the wolf" preset produces mesopredator
+   release; the fox is redundant and its loss is absorbed. A HIPPC
+   board applies chronic pressures (click a letter). A biodiversity
+   meter and stability readout respond. Built on teachKit.
+   ============================================================ */
+MODELS.push({
+  id:'web',
+  name:'10 · The Web',
+  level:'Levels 32–33, 38–39 · 3.1.9-12.M/X',
+  hint:'Click a species to read, click it again to remove it · Remove the wolf for a cascade · click HIPPC letters for chronic stress',
+  radius:18,
+  build:function(ctx){
+    var g=ctx.group, self=this;
+    g.position.y=-3.4;
+    var GREEN=0x7BC47F, AMBER=0xF0A73A, PURPLE=0x9B5FE0, PINK=0xE0417B, SOIL=0x8A6A4A, TEAL=0x2FB8A0;
+    var STEP=0.5;
+    self._lastStep=0; self._press={H:false,I:false,P1:false,P2:false,C:false}; self._stab=0; self._bio=1;
+
+    var SP=[
+      {key:'grass',    name:'Grasses',     lvl:0, x:-3.6, z:1.6,  hex:GREEN,  rel:0.6, prey:[]},
+      {key:'trees',    name:'Willow & aspen', lvl:0, x:0.2, z:-2.2, hex:0x3F9F6B, rel:1.2, curve:2, prey:[]},
+      {key:'flowers',  name:'Wildflowers', lvl:0, x:3.8,  z:1.4,  hex:0xA9DDA0, rel:0.6, prey:[]},
+      {key:'elk',      name:'Elk',         lvl:1, x:-2.9, z:-1.4, hex:AMBER,  rel:0.9, prey:[['grass',1],['trees',1.2]]},
+      {key:'rabbit',   name:'Rabbit',      lvl:1, x:-0.5, z:1.9,  hex:AMBER,  rel:0.6, prey:[['grass',1],['flowers',0.6]]},
+      {key:'mouse',    name:'Mouse',       lvl:1, x:1.9,  z:0.1,  hex:AMBER,  rel:0.6, prey:[['grass',0.7],['flowers',1]]},
+      {key:'insects',  name:'Insects · pollinators', lvl:1, x:4.3, z:-1.3, hex:0xE8C25A, rel:0.5, prey:[['flowers',1.2],['grass',0.6]]},
+      {key:'coyote',   name:'Coyote',      lvl:2, x:-3.1, z:0.9,  hex:PURPLE, rel:1.0, prey:[['rabbit',1],['mouse',0.8],['insects',0.3]]},
+      {key:'fox',      name:'Fox',         lvl:2, x:-0.3, z:-1.7, hex:PURPLE, rel:0.4, prey:[['mouse',1],['rabbit',0.7]]},
+      {key:'hawk',     name:'Hawk',        lvl:2, x:2.5,  z:1.5,  hex:PURPLE, rel:0.4, prey:[['mouse',1],['rabbit',0.6],['songbird',0.5]]},
+      {key:'songbird', name:'Songbird',    lvl:2, x:4.7,  z:-0.7, hex:0xB98BFF, rel:0.4, prey:[['insects',1]]},
+      {key:'wolf',     name:'Wolf',        lvl:3, x:-1.5, z:-0.3, hex:PINK,   rel:0.3, prey:[['elk',1.2],['rabbit',0.5],['coyote',0.9]]},
+      {key:'fungi',    name:'Fungi & bacteria', lvl:-1, x:-6.2, z:-1.2, hex:SOIL, rel:0, prey:[]}
+    ];
+    var S={}; SP.forEach(function(s){ S[s.key]=s; s.P=1; s.removed=false; s.y=s.lvl<0?0.4:s.lvl*2.4; s.preds=[]; });
+    SP.forEach(function(s){ s.prey.forEach(function(pr){ S[pr[0]].preds.push([s.key,pr[1]]); }); });
+    var KMOD={H:{grass:0.8,trees:0.6,flowers:0.6,songbird:0.6,coyote:1.2}, I:{grass:0.5,songbird:0.6,mouse:0.8}, P1:{insects:0.4,mouse:0.8}, P2:{wolf:0.5,elk:0.7,coyote:1.1}, C:{flowers:0.7,trees:0.8,insects:0.8,songbird:0.9}};
+
+    var INFO={
+      'grass':{tag:'Producer', title:'Grasses', body:'Captures sunlight for the whole web; four herbivores graze it. Its numbers track grazing pressure — when wolves hold elk in check it recovers; when an invasive cheatgrass moves in it is out-competed.'},
+      'trees':{tag:'Producer', title:'Willow & aspen', body:'Browsed by elk. In Yellowstone these crashed after wolves were removed and elk browsed unchecked, and regrew when wolves returned — the textbook trophic cascade. Remove the wolf here and watch this node.'},
+      'flowers':{tag:'Producer', title:'Wildflowers', body:'Feed rabbits, mice and insects — and depend on the insects in return: no pollinators, no seed. About a third of our crops rely on the same service.'},
+      'elk':{tag:'Primary consumer', title:'Elk', body:'A large grazer and browser, held in check by wolves. Release it and it strips the willow and aspen; the loss then runs on to the songbirds and beavers that lived in them.'},
+      'rabbit':{tag:'Primary consumer', title:'Rabbit', body:'Prey for coyote, fox, hawk and wolf — four predators sharing one resource. Lose one predator and the others absorb the slack; lose the apex and the released coyotes press harder than before.'},
+      'mouse':{tag:'Primary consumer', title:'Mouse', body:'Prey for coyote, fox and hawk. A specialist on seeds and grass, so pollution or invasives that thin the producers reach it fast.'},
+      'insects':{tag:'Primary consumer · pollinators', title:'Insects', body:'Grasshoppers, bees and the rest: food for songbirds and coyotes, and the pollinators the wildflowers need to set seed. Pesticides hit this node first, and the flowers follow.'},
+      'coyote':{tag:'Mesopredator · generalist', title:'Coyote', body:'A generalist: varied diet, flexible habits, tolerates fragmented and suburban landscapes, and shifts to night when people are around. Suppressed by wolves; remove them and it surges — mesopredator release. Culling fails: survivors raise larger litters.'},
+      'fox':{tag:'Mesopredator · redundant', title:'Fox', body:'Eats mice and rabbits — the same prey as the coyote and the hawk. Remove it and the others take up its share: functional redundancy, which is what lets a diverse web absorb a loss.'},
+      'hawk':{tag:'Predator', title:'Hawk', body:'Takes mice, rabbits and songbirds. It responds to prey, not to the wolf, so it rides out a wolf removal but suffers when released coyotes thin the rabbits.'},
+      'songbird':{tag:'Insectivore · specialist', title:'Songbird', body:'Eats insects, is eaten by hawks, and needs intact habitat to nest; fragmentation and invasive cats hit it hard — a specialist in a web of generalists.'},
+      'wolf':{tag:'Keystone · apex predator', title:'Wolf', body:'Few in number, enormous in effect: it limits elk, suppresses coyotes, and through them shapes the trees, the rabbits and the river banks. A keystone species is one whose effect is out of proportion to its abundance. Remove it and the web reorganizes.'},
+      'fungi':{tag:'Decomposers', title:'Fungi & bacteria', body:'Every node ends here. Decomposers return nitrogen, phosphorus and carbon to the soil the producers grow in — matter cycles, energy does not. Without them the web would starve on a pile of its own dead.'},
+      'meter':{tag:'Readout', title:'Biodiversity meter', body:'Height is species diversity — how many species are present and how evenly their populations are spread. Beneath it, stability: whether populations have settled or are still cascading. Diverse webs absorb losses through redundancy; simplified webs pass each loss along.'},
+      'hippc':{tag:'Chronic pressures', title:'HIPPC board', body:'The five human pressures driving the current extinction: Habitat loss, Invasive species, Pollution, human Population, Climate change. Each applies chronic stress across the web rather than removing one species. Click a letter to apply one; stack them and watch the meter.'},
+      'hippcH':{tag:'Pressure · click to toggle', title:'H · Habitat loss', body:'The biggest driver of extinction. Clearing and fragmenting land shrinks the producers\' carrying capacity and favors edge-tolerant generalists like the coyote over nesting specialists like the songbird.'},
+      'hippcI':{tag:'Pressure · click to toggle', title:'I · Invasive species', body:'Arrive without their natural enemies: an invasive grass out-competes the native, a feral cat adds a predator the songbirds never evolved with.'},
+      'hippcP1':{tag:'Pressure · click to toggle', title:'P · Pollution', body:'Pesticides and runoff thin the insects first; the pollination they provide, and the songbirds that eat them, follow.'},
+      'hippcP2':{tag:'Pressure · click to toggle', title:'P · Human population', body:'Hunting and roads thin the wolves and elk; more people in the landscape favors the species that tolerate them — the coyote most of all.'},
+      'hippcC':{tag:'Pressure · click to toggle', title:'C · Climate change', body:'Shifts ranges and timing: flowers bloom before their pollinators emerge, trees are stressed by drought. Specialists tied to one season or host are hit hardest.'},
+      'linkHerb':{tag:'Link · herbivory', title:'Herbivory link', body:'Energy flowing from a producer to the animal that eats it — the arrow points from eaten to eater. Only about a tenth of what the plant stored arrives.'},
+      'linkPred':{tag:'Link · predation', title:'Predation link', body:'Prey to predator. Each predator here has several prey and each prey several predators — the multiple pathways that make this a web, not a chain, and that let it absorb losses.'},
+      'linkPoll':{tag:'Link · mutualism', title:'Pollination link', body:'Both partners benefit: the insects feed on the flowers and the flowers are pollinated in return. Lose either and the other follows — mutualism is the web\'s tightest coupling.'},
+      'linkDecomp':{tag:'Link · decomposition', title:'Decomposition link', body:'Dead matter from any node to the decomposers, and nutrients back to the soil. Matter cycles through this link; the energy leaves as heat.'},
+      'linkIntra':{tag:'Link · suppression', title:'Suppression link', body:'The wolf kills and intimidates the coyote — competition between predators. It barely feeds the wolf; it holds the coyote down, which is why cutting it releases the mesopredator.'}
+    };
+
+    SP.forEach(function(s){ INFO[s.key].body+=' Click it again to remove it from the web.'; });
+
+    var STOPS=[
+      {tag:'Overview', focus:null, r:18, keys:['wolf','grass','fungi'], act:'restore', title:'Thirteen species, one web',
+       body:'Producers at the bottom, herbivores above them, predators above those, the wolf on top, decomposers off to the side. Each sphere\'s size is that population. The links are where energy goes. Click any species to read about it — and click it again to remove it.'},
+      {tag:'Links', focus:'rabbit', r:9, keys:['linkHerb','linkPred','linkPoll','linkDecomp'], act:'restore', title:'Five kinds of link',
+       body:'Green links are herbivory, purple are predation, amber is the pollination mutualism between insects and flowers, brown runs to the decomposers, and the red one is the wolf suppressing the coyote. The rabbit has four predators: that redundancy is why one loss rarely matters.'},
+      {tag:'Readouts', focus:'meter', r:8, keys:['meter'], act:'restore', title:'Biodiversity and stability',
+       body:'The meter measures species diversity: how many are present and how evenly spread. Beneath it, stability reports whether the populations have settled. Watch both every time you change the web.'},
+      {tag:'Keystone', focus:'wolf', r:8, keys:['wolf','linkIntra'], act:'restore', title:'The keystone',
+       body:'The wolf is the rarest animal here and the most important: it limits elk and holds the coyote down. A keystone species has an effect out of all proportion to its numbers. Next stop removes it.'},
+      {tag:'Cascade', focus:'coyote', r:9, keys:['coyote','wolf'], act:'wolfOut', title:'Remove the wolf: mesopredator release',
+       body:'Wolf gone. The coyote, no longer suppressed, has surged — mesopredator release, the syllabus\'s own example. Released coyotes press the rabbits and mice harder, and the fox and hawk feel it next.'},
+      {tag:'Cascade', focus:'trees', r:9, keys:['trees','elk'], act:'wolfOut', title:'Trophic cascade: elk up, trees down',
+       body:'With no wolves the elk browse unchecked and the willow and aspen crash — exactly what Yellowstone recorded, and reversed when wolves were reintroduced. Removing a top predator changes the plants two links away.'},
+      {tag:'Redundancy', focus:'hawk', r:9, keys:['hawk','coyote','rabbit'], act:'foxOut', title:'Remove the fox: absorbed',
+       body:'Web restored, fox removed. Almost nothing moves: coyote and hawk take up its prey, the meter drops one species\' worth, stability returns at once. Functional redundancy — several species doing similar jobs — is what diversity buys.'},
+      {tag:'Mutualism', focus:'flowers', r:9, keys:['flowers','insects','linkPoll'], act:'insectsOut', title:'Remove the pollinators',
+       body:'Insects gone. The wildflowers cannot set seed and collapse, and with them the rabbits and mice that ate them, then the predators above. A third of our crops depend on the same insects — this is the cascade that reaches the plate.'},
+      {tag:'Generalists', focus:'coyote', r:8, keys:['coyote','songbird'], act:'restore', title:'Who survives us',
+       body:'Human landscapes favor generalists: the coyote eats anything, breeds in suburbs, goes nocturnal around people, and answers culling with larger litters. Specialists like the songbird, tied to one food and intact habitat, lose. The same changes favor some traits and punish others.'},
+      {tag:'HIPPC', focus:'hippc', r:9, keys:['hippcH','hippcI','hippcP1','hippcP2','hippcC'], act:'allPressures', title:'Chronic pressure: all five at once',
+       body:'Habitat loss, Invasive species, Pollution, human Population, Climate change — applied together. No species was removed, yet the meter falls and the specialists thin out. This is how the current extinction runs: not one dramatic removal, but five pressures from a single species, us.'},
+      {tag:'Extinction', focus:'meter', r:8, keys:['meter'], act:'allPressures', title:'Far above the background rate',
+       body:'Species have always gone extinct at a slow background rate, with five mass extinctions on top. Today\'s rate is far above background and most species are not even described yet. Each loss opens a niche — but recovery takes millions of years, and what a species was worth is often unknown until it is gone.'},
+      {tag:'Restoration', focus:'wolf', r:9, keys:['wolf','trees'], act:'restore', title:'Putting it back',
+       body:'Restored. Reintroducing wolves to Yellowstone reversed the cascade; corridors reconnect fragmented habitat; every intervention is judged on cost, feasibility, side effects and outcomes, often modeled first — like this one. Conserving a species of unknown value is the cheapest option, because extinction is the one change you cannot undo.'},
+      {tag:'Takeaway', focus:null, r:18, keys:['wolf','fox','insects'], act:'restore', title:'Diverse webs absorb; simple webs cascade',
+       body:'The fox could go because others did its job. The wolf could not, because nothing else does. Remove the pollinators and the loss runs to the top. Now Quiz: predict what each removal will do before you click.'}
+    ];
+    STOPS.forEach(function(st){ st.enter=function(){ act(st.act); }; });
+    var QUIZ=[
+      {q:'Click the keystone species.', keys:['wolf'], enter:function(){ act('restore'); },
+       ok:'The wolf — few in number, out-of-proportion effect.', hint:'The one at the top of the web.'},
+      {q:'Predict, then click: the wolf is removed. Click the species that will SURGE.', keys:['coyote'], enter:function(){ act('restore'); },
+       ok:'The coyote: mesopredator release once the wolf stops suppressing it.', hint:'Which predator does the red suppression link point to?'},
+      {q:'Predict, then click: with the wolf gone, elk browse unchecked. Click the producer that will crash.', keys:['trees'], enter:function(){ act('restore'); },
+       ok:'Willow and aspen — the Yellowstone trophic cascade.', hint:'What do elk browse? Follow the green link down from the elk.'},
+      {q:'Click a species whose removal the web would simply absorb.', keys:['fox'], enter:function(){ act('restore'); },
+       ok:'The fox: coyote and hawk already eat its prey. Functional redundancy.', hint:'A mesopredator with the same prey as two others.'},
+      {q:'Click the pollinators whose loss would take the wildflowers with them.', keys:['insects'], enter:function(){ act('restore'); },
+       ok:'The insects — the mutualism partner of the flowers.', hint:'The yellow node joined to the flowers by an amber link.'},
+      {q:'Click a mutualism link.', keys:['linkPoll'], enter:function(){ act('restore'); },
+       ok:'The pollination link: both partners benefit.', hint:'The amber link between insects and flowers.'},
+      {q:'Click a predation link.', keys:['linkPred'], enter:function(){ act('restore'); },
+       ok:'Prey to predator — energy flowing from eaten to eater.', hint:'Any purple link.'},
+      {q:'Click the biodiversity meter.', keys:['meter'], enter:function(){ act('restore'); },
+       ok:'Species diversity and stability, live.', hint:'The vertical bar on the right.'},
+      {q:'Click the generalist that thrives in suburbs and shifts to night activity around people.', keys:['coyote'], enter:function(){ act('restore'); },
+       ok:'The coyote — varied diet, flexible behavior, bigger litters when culled.', hint:'A mesopredator, not the specialist songbird.'},
+      {q:'Click the pressure that is the biggest single driver of extinction today.', keys:['hippcH'], enter:function(){ act('restore'); },
+       ok:'Habitat loss.', hint:'The top letter on the HIPPC board.'},
+      {q:'Click the decomposers that return nutrients to the producers.', keys:['fungi'], enter:function(){ act('restore'); },
+       ok:'Fungi and bacteria: matter cycles, energy does not.', hint:'Off to the lower left, joined by brown links.'},
+      {q:'The wolf was removed a while ago. Click the species that has ALREADY surged.', keys:['coyote'], enter:function(){ act('wolfOut'); },
+       ok:'The coyote — look at its size against the others.', hint:'Which sphere is now the largest predator?'},
+      {q:'Click the link that carries dead matter back to the soil.', keys:['linkDecomp'], enter:function(){ act('restore'); },
+       ok:'A decomposition link.', hint:'Any brown link running to the fungi.'}
+    ];
+    var K=teachKit(self, {id:'web', radius:18, group:g, labels:true, stops:STOPS, quiz:QUIZ, onTourEnd:function(){ act('restore'); }});
+    var reg=K.register;
+    function setText(sp, txt){ if(sp.userData.txt!==txt){ sp.userData.txt=txt; K.relabel(sp, txt); } }
+
+    /* ---------- nodes ---------- */
+    var nodeGeo=new THREE.SphereGeometry(1,22,18);
+    SP.forEach(function(s){ var m=new THREE.Mesh(nodeGeo, mat(s.hex,{rough:0.5})); m.position.set(s.x,s.y,s.z); g.add(m); reg(s.key,m,INFO[s.key]); s.mesh=m; s.label=K.label(m,s.name,0.95); });
+    /* ---------- links ---------- */
+    var links=[];
+    function link(a,b,type,hex){ var A=S[a], B=S[b]; var m=segment(new THREE.Vector3(A.x,A.y,A.z), new THREE.Vector3(B.x,B.y,B.z), 0.045, hex); m.material.transparent=true; g.add(m); reg(type,m,INFO[type]); links.push({m:m,a:A,b:B,type:type}); }
+    SP.forEach(function(s){ s.prey.forEach(function(pr){ var P=S[pr[0]]; if(s.key==='wolf'&&pr[0]==='coyote') link(pr[0],s.key,'linkIntra',PINK); else link(pr[0],s.key, P.lvl===0?'linkHerb':'linkPred', P.lvl===0?0x3F9F6B:0x8A62C8); }); });
+    link('insects','flowers','linkPoll',AMBER);
+    ['elk','trees','wolf','grass'].forEach(function(k){ link(k,'fungi','linkDecomp',SOIL); });
+
+    /* ---------- meter + stability ---------- */
+    var meter=new THREE.Group(); meter.position.set(7.6,0,0.5);
+    var tube=new THREE.Mesh(new THREE.BoxGeometry(0.7,6.2,0.7), mat(0xD9D2E6,{opacity:0.25})); tube.position.y=3.1; meter.add(tube);
+    var fill=new THREE.Mesh(new THREE.BoxGeometry(0.5,1,0.5), mat(TEAL)); meter.add(fill);
+    var base=new THREE.Mesh(new THREE.CylinderGeometry(0.7,0.7,0.15,20), mat(0x8A82A0)); meter.add(base);
+    g.add(meter); reg('meter',meter,INFO.meter);
+    var meterLabel=K.label(tube,'Biodiversity 100% · stable',3.4);
+    /* ---------- HIPPC board ---------- */
+    var board=new THREE.Group(); board.position.set(-7.4,3.4,0.4);
+    var plank=new THREE.Mesh(new THREE.BoxGeometry(1.5,6.4,0.12), mat(0xF4F0E6,{rough:0.9})); plank.position.z=-0.25; board.add(plank); reg('hippc',board,INFO.hippc,true);
+    var cubes={}; var PK=['H','I','P1','P2','C'], PT=['H · Habitat loss','I · Invasives','P · Pollution','P · Population','C · Climate'];
+    PK.forEach(function(k,i){ var c=new THREE.Mesh(new THREE.BoxGeometry(0.8,0.8,0.5), mat(0xB8B4C8,{rough:0.6})); c.position.set(0,2.4-i*1.2,0.1); board.add(c); reg('hippc'+k,c,INFO['hippc'+k]); cubes[k]=c; K.label(c,PT[i],0.55); });
+    K.label(plank,'HIPPC · click a letter',3.6);
+
+    /* ---------- simulation ---------- */
+    function kmod(s){ var m=1; PK.forEach(function(k){ if(self._press[k] && KMOD[k][s.key]!==undefined) m*=KMOD[k][s.key]; }); return m; }
+    function step(){
+      var targets={}, move=0;
+      SP.forEach(function(s){
+        if(s.removed){ targets[s.key]=0; return; }
+        var food=1; if(s.prey.length){ var num=0, den=0; s.prey.forEach(function(pr){ num+=pr[1]*S[pr[0]].P; den+=pr[1]; }); food=num/den; }
+        var pres=0; if(s.preds.length){ var n2=0, d2=0; s.preds.forEach(function(pd){ n2+=pd[1]*S[pd[0]].P; d2+=pd[1]; }); pres=n2/d2; }
+        var g1=s.preds.length?(1+s.rel)/(1+s.rel*Math.pow(pres,s.curve||1)):1;
+        var t=kmod(s)*Math.min(1.6,Math.pow(Math.max(0,food),0.7))*g1;
+        if(s.prey.length && food<0.12) t=0;
+        if(s.key==='flowers') t*=0.3+0.7*Math.min(1,S.insects.P);
+        if(s.key==='fungi') t=1;
+        targets[s.key]=Math.max(0,Math.min(2.6,t));
+      });
+      SP.forEach(function(s){ var np=s.P+(targets[s.key]-s.P)*0.25; move+=Math.abs(np-s.P); s.P=np; });
+      self._stab=self._stab*0.5+move*0.5;
+      var present=SP.filter(function(s){ return !s.removed && s.P>0.05; }), tot=0; present.forEach(function(s){ tot+=s.P; });
+      var H=0; present.forEach(function(s){ var p=s.P/tot; H-=p*Math.log(p); });
+      self._bio=Math.exp(H)/SP.length;
+    }
+    function restore(){ SP.forEach(function(s){ s.P=1; s.removed=false; }); PK.forEach(function(k){ self._press[k]=false; }); self._stab=0; self._bio=1; self._lastStep=self._K.animT; }
+    function remove(key){ var s=S[key]; if(!s||s.removed) return; s.removed=true; s.P=0; if(K.sel===key){ K.sel=null; K.highlight([]); K.focusObj=null; }
+      showInfo({tag:'Removed', title:s.name+' removed', body:'Watch the spheres resize over the next few seconds: who grows, who shrinks, and whether the meter settles or keeps falling. Restore brings everything back.'}); }
+    function run(n){ for(var i=0;i<n;i++) step(); }
+    function act(name){
+      if(name==='restore'){ restore(); }
+      else if(name==='wolfOut'){ restore(); remove('wolf'); run(14); }
+      else if(name==='foxOut'){ restore(); remove('fox'); run(14); }
+      else if(name==='insectsOut'){ restore(); remove('insects'); run(16); }
+      else if(name==='allPressures'){ restore(); PK.forEach(function(k){ self._press[k]=true; }); run(14); }
+      refresh();
+    }
+    function refresh(){
+      SP.forEach(function(s){ var r=0.25+0.45*Math.sqrt(Math.max(0,s.P)); s.mesh.visible=!s.removed; s.mesh.scale.setScalar(Math.max(0.12,r));
+        s.mesh.material.color.setHex(s.P<0.08&&!s.removed?0x8A82A0:s.hex); setText(s.label, s.name+' ×'+(s.removed?'0':s.P.toFixed(1))); });
+      links.forEach(function(l){ var v=Math.min(l.a.P,l.b.P); l.m.material.opacity=(l.a.removed||l.b.removed)?0.06:0.25+0.75*Math.min(1,v); });
+      var b=self._bio; fill.scale.y=Math.max(0.05,b*6); fill.position.y=fill.scale.y/2; fill.material.color.setHex(b>0.8?TEAL:(b>0.55?AMBER:PINK));
+      var st=self._stab<0.012?'stable':(self._stab<0.08?'settling':'cascading');
+      setText(meterLabel, 'Biodiversity '+Math.round(b*100)+'% · '+st);
+      PK.forEach(function(k){ var c=cubes[k]; c.material.color.setHex(self._press[k]?PINK:0xB8B4C8); if(K.glow.indexOf(c)<0){ c.material.emissive.setHex(PINK); c.material.emissiveIntensity=self._press[k]?0.35:0; } });
+    }
+    var wolfBtn=K.button('webWolf','btn','Remove the wolf'); wolfBtn.onclick=function(){ remove('wolf'); refresh(); };
+    var restoreBtn=K.button('webRestore','btn ghost','Restore'); restoreBtn.onclick=function(){ act('restore'); };
+    act('restore');
+    self._parts={SP:SP, S:S, step:step, refresh:refresh, remove:remove, STEP:STEP, PK:PK, togglePress:function(k){ self._press[k]=!self._press[k]; refresh(); }};
+  },
+  onPick:function(info){
+    var K=this._K, P=this._parts;
+    if(info && !K.quiz){
+      if(info.key.indexOf('hippc')===0 && info.key.length>5){ var r0=K.onPick(info); P.togglePress(info.key.slice(5)); return r0; }
+      if(P.S[info.key] && K.sel===info.key){ P.remove(info.key); P.refresh(); return false; }
+    }
+    return K.onPick(info);
+  },
+  onReset:function(){ this._K.onReset(); },
+
+  tick:function(t){
+    var self=this, P=self._parts; if(!P) return;
+    var f=self._K.tick(t), at=f.at;
+    if(at-self._lastStep>P.STEP){ self._lastStep=at; P.step(); P.refresh(); }
+    P.SP.forEach(function(s,i){ if(!s.removed) s.mesh.position.y=s.y+0.06*Math.sin(at*1.3+i); });
+  }
+});
+
 boot();
 </script>
 </body>
