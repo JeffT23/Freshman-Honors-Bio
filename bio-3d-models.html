@@ -2994,6 +2994,291 @@ MODELS.push({
   }
 });
 
+/* ============================================================
+   MODEL 6 — Inside an Artery: Cholesterol & Plaque (Levels 12, 19)
+   A cut-away artery with three translucent wall layers, red cells
+   drifting with the flow, and LDL / HDL particles as distinct
+   carriers. A live simulation: LDL dives into the wall and deposits
+   cholesterol, the plaque grows and narrows the lumen, HDL docks at
+   the plaque and carries cholesterol back to the liver. Scenarios
+   (baseline / high saturated fat / fiber + exercise / FH gene on a
+   clean diet) change the LDL:HDL balance; at full size the cap
+   ruptures and a clot blocks the flow. Clicking the LDLR gene in the
+   scene toggles the genetic scenario. Built on teachKit.
+   ============================================================ */
+MODELS.push({
+  id:'artery',
+  name:'6 · Inside an Artery',
+  level:'Levels 12, 19 · 3.1.9-12.F',
+  hint:'Click a carrier, a wall layer or the plaque · pick a scenario and watch the plaque grow or shrink · Tour stages a heart attack',
+  radius:20,
+  build:function(ctx){
+    var g=ctx.group, self=this;
+    g.rotation.y=0.6; /* the artery runs across the screen at the default camera angle */
+    var PINK=0xE0417B, AMBER=0xF0A73A, TEAL=0x2FB8A0, PURPLE=0x6B4BA8, YEL=0xFFE066, RED=0xD23B5A, DARK=0x8A1C2E;
+    var SCEN={baseline:{ldl:6,hdl:4,dive:0.15,dock:0.3,label:'baseline'}, satfat:{ldl:12,hdl:3,dive:0.5,dock:0.15,label:'high saturated fat'},
+              fiber:{ldl:4,hdl:8,dive:0.08,dock:0.7,label:'fiber + exercise'}, fh:{ldl:14,hdl:4,dive:0.6,dock:0.25,label:'FH gene · clean diet'}};
+    var PX=1.0, N_DOTS=40;
+    self._scen='baseline'; self._p=0.05; self._rupt=0; self._flash=-9;
+
+    var INFO={
+      'cholesterol':{tag:'One molecule', title:'Cholesterol',
+        body:'A steroid: four fused carbon rings with a short tail — one molecule, nonpolar, insoluble in blood. Every cell membrane needs it for flexibility and it is the raw material for steroid hormones. There is no "good" or "bad" cholesterol; there are two carriers moving the same molecule in opposite directions.'},
+      'ldl':{tag:'Carrier · outbound', title:'LDL particle',
+        body:'Low-density lipoprotein: a protein shell packed with cholesterol, delivering it from the liver to tissues that need it. When there is more LDL than the tissues take up, particles slip under the artery lining and unload where nothing wanted it. High LDL is the strongest dietary and genetic driver of plaque.'},
+      'hdl':{tag:'Carrier · return', title:'HDL particle',
+        body:'High-density lipoprotein: a smaller shell that collects excess cholesterol — from artery walls included — and carries it back to the liver for disposal. This is reverse transport, the opposite direction to LDL. Fiber and exercise raise it; the plaque shrinks when HDL wins.'},
+      'rbc':{tag:'Blood', title:'Red blood cell',
+        body:'Oxygen carriers riding the flow. They have nothing to do with building plaque, but they feel it: as the lumen narrows the flow past the plaque falls, and when a clot forms they stop — and so does the oxygen to whatever the artery feeds.'},
+      'endothelium':{tag:'Wall · inner layer', title:'Endothelium',
+        body:'The one-cell-thick lining the blood touches. Healthy, it keeps LDL out; damaged by high LDL, smoking or high blood pressure, it lets particles through, and the ones that get trapped beneath it are oxidized — the first step of a plaque.'},
+      'media':{tag:'Wall · middle layer', title:'Smooth muscle (media)',
+        body:'Muscle that sets the artery\'s diameter. In a growing plaque these cells migrate inward and lay down the fibrous cap over the fatty core — which stabilizes it until the cap cracks.'},
+      'adventitia':{tag:'Wall · outer layer', title:'Adventitia',
+        body:'The tough outer coat of connective tissue that anchors the artery. Plaque builds on the blood side, not here, which is why a severely narrowed artery can look normal from the outside.'},
+      'plaque':{tag:'Atherosclerosis', title:'Plaque',
+        body:'Deposited cholesterol, dead foam cells and scar tissue bulging into the lumen. As it grows the opening narrows and the flow beyond it falls — atherosclerosis. Its size tracks the LDL:HDL balance over years, and it can shrink when the balance reverses.'},
+      'cap':{tag:'Fibrous cap', title:'Fibrous cap',
+        body:'A skin of smooth-muscle cells and collagen over the fatty core. A thick cap makes a plaque stable; inflammation thins it. A thin cap over a large core is the plaque that cracks.'},
+      'macrophage':{tag:'Inflammation', title:'Macrophage → foam cell',
+        body:'A white cell that crawls in to clear the oxidized LDL — and chokes on it, swelling into a cholesterol-stuffed foam cell. Foam cells are the fatty streak, and the inflammation they trigger recruits more of them: plaque is an immune response that never resolves.'},
+      'clot':{tag:'Heart attack', title:'Thrombus (clot)',
+        body:'The cap has cracked, blood has met the fatty core and platelets have clotted over the break, blocking the lumen. Downstream, the muscle this artery fed is starved of oxygen: in a coronary artery that is a heart attack; in the brain, a stroke. Most heart attacks come from plaques that ruptured, not from ones that slowly closed.'},
+      'liver':{tag:'Source and sink', title:'Liver',
+        body:'Makes most of the body\'s cholesterol — diet adds to it — packages it into LDL, and clears LDL from the blood through receptors on its surface. HDL returns excess cholesterol here for disposal. Cholesterol is built from scratch whether or not you eat any.'},
+      'receptor':{tag:'LDL receptor', title:'LDL receptors',
+        body:'Proteins on liver cells that pull LDL out of the blood. The more receptors, the lower the LDL. Familial hypercholesterolemia breaks the gene for this receptor, so LDL stays in circulation from birth — and plaque forms on any diet.'},
+      'gene':{tag:'Genetic scenario · click to toggle', title:'LDLR gene',
+        body:'One gene, for the LDL receptor. One faulty copy (dominant inheritance) is enough for familial hypercholesterolemia: very high LDL from childhood and early plaque regardless of diet. Most heart-disease risk is not like this — it is polygenic plus environment — but this single gene shows that cholesterol is made and cleared inside you, not just eaten.'},
+      'readout':{tag:'Blood chemistry', title:'LDL · HDL · flow',
+        body:'What a blood test reports: how many outbound and return carriers are circulating, and here, how much of the flow still passes the plaque. The ratio, not either number alone, predicts which way the plaque moves.'}
+    };
+
+    var STOPS=[
+      {tag:'Overview', focus:null, r:20, keys:['endothelium','rbc'], act:'baseline', title:'Inside an artery',
+       body:'Blood flows left to right through a cut-away artery: three wall layers, red cells, and two kinds of lipoprotein carrier. At the bottom a plaque is just starting. Pick a scenario at any time and watch it grow or shrink; the Tour first names the molecule, then stages how a plaque forms.'},
+      {tag:'Molecule', focus:'cholesterol', r:6, keys:['cholesterol'], act:'baseline', title:'Cholesterol is one molecule',
+       body:'Four fused rings and a tail — a steroid, nonpolar, insoluble in blood. Your membranes and steroid hormones need it, and your liver makes most of it. There is no good or bad cholesterol. What differs is the carrier it travels in and the direction it is going.'},
+      {tag:'Carriers', focus:'ldl', r:7, keys:['ldl'], act:'baseline', title:'LDL: outbound delivery',
+       body:'LDL particles carry cholesterol from the liver to the tissues. The amber spheres are LDL. In excess they slip under the artery lining and unload where nothing wanted it — that is why high LDL means high risk.'},
+      {tag:'Carriers', focus:'hdl', r:7, keys:['hdl'], act:'baseline', title:'HDL: the return trip',
+       body:'HDL particles — the small teal spheres — collect excess cholesterol, from artery walls included, and bring it back to the liver for disposal: reverse transport. Same molecule, opposite direction. The plaque grows when LDL outruns HDL and shrinks when HDL catches up.'},
+      {tag:'Stage 1 · Deposit', focus:'endothelium', r:7, keys:['endothelium','ldl','cholesterol'], act:'deposit', title:'How a plaque forms: deposit',
+       body:'Watch an LDL particle dive through the endothelium. Trapped beneath the lining, its cholesterol is oxidized, and a yellow fleck of it stays in the wall. One fleck is nothing; the rate at which they arrive is everything.'},
+      {tag:'Stage 2 · Inflammation', focus:'macrophage', r:6, keys:['macrophage'], act:'inflame', title:'Inflammation: foam cells',
+       body:'White cells crawl in to clear the oxidized cholesterol, swell into foam cells and die there — the fatty streak. The signals they release call in more white cells. From here the plaque is an immune response that cannot finish its job.'},
+      {tag:'Stage 3 · Growth', focus:'plaque', r:7, keys:['plaque','cap','media'], act:'growth', title:'Growth and the fibrous cap',
+       body:'Over years the core of cholesterol and dead cells grows, and smooth-muscle cells from the wall lay a fibrous cap over it. A thick cap is stable. Keep the LDL high and the core outgrows its cap.'},
+      {tag:'Stage 4 · Narrowing', focus:'plaque', r:9, keys:['plaque','rbc','readout'], act:'narrow', title:'Narrowed flow',
+       body:'The plaque now takes most of the lumen and the cells crowd past it. Less blood reaches whatever is downstream — chest pain on effort if this is a coronary artery. This is atherosclerosis: plaque narrowing the arteries.'},
+      {tag:'Stage 5 · Rupture', focus:'clot', r:7, keys:['clot','cap'], act:'rupture', title:'Rupture: why this is a heart attack',
+       body:'The cap cracks. Blood meets the fatty core, platelets clot over the break, and the clot seals the artery. Every cell downstream loses its oxygen within minutes. A heart attack is a plumbing failure here, not a slow squeeze — most come from plaques that ruptured.'},
+      {tag:'Diet', focus:'ldl', r:9, keys:['ldl','readout'], act:'satfat', title:'Saturated fat raises LDL',
+       body:'Saturated fats — straight chains that pack tightly and are solid at room temperature — and trans fats push the liver to send out more LDL. Scenario switched: count the amber spheres now, and watch the plaque. Unsaturated fats, with kinks in their chains, do the opposite.'},
+      {tag:'Diet', focus:'hdl', r:9, keys:['hdl','liver'], act:'fiber', title:'Fiber and exercise: reverse the traffic',
+       body:'Soluble fiber binds cholesterol in the gut; exercise raises HDL. Now the return carriers outnumber the outbound ones, HDL docks at the plaque and ferries cholesterol back to the liver, and the plaque shrinks. Direction of travel, not the molecule, is what changed.'},
+      {tag:'Genetics', focus:'gene', r:7, keys:['gene','receptor','ldl'], act:'fh', title:'Familial hypercholesterolemia: plaque on a clean diet',
+       body:'Scenario: FH, clean diet. One faulty copy of the LDL-receptor gene — dominant — and the liver cannot clear LDL from the blood. LDL is very high from childhood and the plaque grows on any diet. Click the gene to toggle it. Genetics alone can do this; so can diet alone; most people are somewhere in between.'},
+      {tag:'Risk', focus:'liver', r:9, keys:['liver','receptor'], act:'baseline', title:'Risk is multifactorial',
+       body:'Outside FH, heart-disease risk is polygenic — many genes, each nudging LDL, HDL, blood pressure — multiplied by environment: diet, exercise, smoking. A polygenic risk score is a probability, not a verdict; identical twins raised apart end up with different arteries. No single "gene for" heart disease exists.'},
+      {tag:'Takeaway', focus:null, r:20, keys:['ldl','hdl','cholesterol'], act:'baseline', title:'One molecule, two directions',
+       body:'Cholesterol is one steroid your liver makes. LDL carries it out, HDL carries it back. Plaque is the balance of the two over years, run through an immune response, and the heart attack is the clot when the cap breaks. Try the Quiz; switch scenarios while it runs.'}
+    ];
+    STOPS.forEach(function(st){ st.enter=function(){ act(st.act); }; });
+    var QUIZ=[
+      {q:'Click the carrier that delivers cholesterol to tissues and deposits it in artery walls.', keys:['ldl'], enter:function(){ act('baseline'); },
+       ok:'LDL — outbound delivery, and the particle that gets under the lining.', hint:'The larger amber spheres in the blood.'},
+      {q:'Click the carrier that returns excess cholesterol to the liver.', keys:['hdl'], enter:function(){ act('baseline'); },
+       ok:'HDL — reverse transport, back to the liver.', hint:'The small teal spheres.'},
+      {q:'Click the molecule itself — the steroid both carriers transport.', keys:['cholesterol'], enter:function(){ act('growth'); },
+       ok:'Cholesterol: one molecule, whichever carrier it rides in.', hint:'The four-ring molecule above the artery, or a yellow fleck inside the plaque.'},
+      {q:'Click the organ that makes most of your cholesterol and clears LDL from the blood.', keys:['liver'], enter:function(){ act('baseline'); },
+       ok:'The liver — source and sink.', hint:'Bottom right, below the artery.'},
+      {q:'Click the cell that engulfs deposited cholesterol and becomes a foam cell.', keys:['macrophage'], enter:function(){ act('inflame'); },
+       ok:'A macrophage — the inflammation that turns a deposit into a plaque.', hint:'The pale cells inside the plaque.'},
+      {q:'Click the plaque narrowing this artery.', keys:['plaque'], enter:function(){ act('narrow'); },
+       ok:'Atherosclerosis: the bulge taking most of the lumen.', hint:'The large yellow mass on the floor of the artery.'},
+      {q:'Click what turns a cracked plaque into a heart attack.', keys:['clot'], enter:function(){ act('rupture'); },
+       ok:'The clot sealing the artery — oxygen stops downstream.', hint:'The dark red mass over the ruptured plaque.'},
+      {q:'Click the layer LDL has to cross to get into the wall.', keys:['endothelium'], enter:function(){ act('baseline'); },
+       ok:'The endothelium — the one-cell lining.', hint:'The innermost wall layer, the one the blood touches.'},
+      {q:'A patient eats well and exercises, yet has had very high LDL since childhood. Click the most likely cause.', keys:['gene','receptor'], enter:function(){ act('fh'); },
+       ok:'A faulty LDL-receptor gene: familial hypercholesterolemia.', hint:'Not the diet. Look near the liver.'},
+      {q:'Click the structure that pulls LDL out of the blood.', keys:['receptor'], enter:function(){ act('baseline'); },
+       ok:'LDL receptors on the liver.', hint:'The small posts on top of the liver.'},
+      {q:'Click a red blood cell.', keys:['rbc'], enter:function(){ act('baseline'); },
+       ok:'A red cell — an oxygen carrier that only suffers the consequences.', hint:'The red discs riding the flow.'},
+      {q:'Click the skin that makes a plaque stable until it cracks.', keys:['cap'], enter:function(){ act('growth'); },
+       ok:'The fibrous cap of smooth muscle and collagen.', hint:'The pink shell over the plaque.'},
+      {q:'Predict, then click: HDL now outnumbers LDL. Click the structure that will SHRINK.', keys:['plaque'], enter:function(){ act('fiber'); },
+       ok:'The plaque — HDL ferries its cholesterol back to the liver.', hint:'What does reverse transport remove cholesterol from?'}
+    ];
+    var K=teachKit(self, {id:'artery', radius:20, group:g, labels:true, stops:STOPS, quiz:QUIZ, onTourEnd:function(){ act('baseline'); }});
+    var reg=K.register;
+    function setText(sp, txt){ if(sp.userData.txt!==txt){ sp.userData.txt=txt; K.relabel(sp, txt); } }
+
+    /* ---------- artery wall: three cut-away layers ---------- */
+    var GAP=1.75, TH0=0.46+GAP/2, THL=Math.PI*2-GAP;
+    function layer(r, hex, op){ var m=new THREE.Mesh(new THREE.CylinderGeometry(r,r,16,56,1,true,TH0,THL), mat(hex,{opacity:op, side:THREE.DoubleSide})); m.rotation.z=Math.PI/2; g.add(m); return m; }
+    var endo=layer(2.25,0xF7C9D4,0.42), media=layer(2.6,PINK,0.2), adv=layer(2.95,0xD9D2E6,0.2);
+    reg('endothelium',endo,INFO.endothelium,true); reg('media',media,INFO.media,true); reg('adventitia',adv,INFO.adventitia,true);
+    /* the cut faces show the three layers as solid bands — these are the easy click targets */
+    var BANDS=[['endothelium',2.2,2.42,0xF7C9D4],['media',2.42,2.78,PINK],['adventitia',2.78,3.0,0xD9D2E6]];
+    BANDS.forEach(function(b){ var key=b[0], r0=b[1], r1=b[2], hex=b[3], rm=(r0+r1)/2;
+      [TH0, TH0+THL].forEach(function(th){ var bx=new THREE.Mesh(new THREE.BoxGeometry(16,r1-r0,0.12), mat(hex,{rough:0.7})); bx.position.set(0,rm*Math.sin(th),rm*Math.cos(th)); bx.rotation.x=Math.PI/2-th; g.add(bx); reg(key,bx,INFO[key]); });
+      [-8,8].forEach(function(x){ var ring=new THREE.Mesh(new THREE.RingGeometry(r0,r1,56,1,Math.PI-TH0-THL,THL), mat(hex,{rough:0.7,side:THREE.DoubleSide})); ring.rotation.y=Math.PI/2; ring.position.x=x; g.add(ring); reg(key,ring,INFO[key]); });
+    });
+
+    /* ---------- plaque, cap, cholesterol flecks, foam cells, clot ---------- */
+    /* the cholesterol molecule is registered first so it is the key's focus object */
+    var chol=new THREE.Group(); chol.position.set(-5.2,4.7,1.2);
+    [[0,0,6],[0.62,0.05,6],[1.24,0,6],[1.8,0.1,5]].forEach(function(rg){ var tr=new THREE.Mesh(new THREE.TorusGeometry(rg[2]===5?0.3:0.34,0.06,6,rg[2]), mat(YEL)); tr.position.set(rg[0],rg[1],0); chol.add(tr); });
+    var oh=ball(0.13,PINK,10); oh.position.set(-0.45,-0.1,0); chol.add(oh);
+    [[2.25,0.3],[2.55,0.15],[2.85,0.3]].forEach(function(t){ var tb=ball(0.09,YEL,8); tb.position.set(t[0],t[1],0); chol.add(tb); });
+    chol.scale.setScalar(1.1); g.add(chol); reg('cholesterol',chol,INFO.cholesterol);
+    var plaque=ball(1,0xF2DD9E,28,{rough:0.75,opacity:0.85}); plaque.position.set(PX,-2.2,0); g.add(plaque); reg('plaque',plaque,INFO.plaque,true);
+    var cap=new THREE.Mesh(new THREE.SphereGeometry(1,28,12,0,Math.PI*2,0,0.95), mat(0xE8A0B0,{opacity:0.6})); cap.position.copy(plaque.position); g.add(cap); reg('cap',cap,INFO.cap);
+    var crack=new THREE.Mesh(new THREE.BoxGeometry(0.08,0.4,1.2), mat(DARK)); crack.visible=false; g.add(crack);
+    var dotGeo=new THREE.SphereGeometry(0.1,8,6), dotMat=mat(YEL); var dots=[];
+    for(var d=0;d<N_DOTS;d++){ var dm=new THREE.Mesh(dotGeo,dotMat); dm.visible=false; var u=Math.random()*2-1, v=Math.random(), w=Math.random()*2-1; var nrm=Math.hypot(u,v,w)||1; var rr=Math.pow(Math.random(),0.5)*0.85; dm.userData.u=[u/nrm*rr, v/nrm*rr, w/nrm*rr]; g.add(dm); reg('cholesterol',dm,INFO.cholesterol); dots.push(dm); }
+    var macs=[]; for(var mi=0;mi<4;mi++){ var mc=ball(0.3,0xEFE9F7,12,{rough:0.9}); mc.visible=false; mc.userData.u=[(mi-1.5)*0.4, 0.5, (mi%2?0.3:-0.3)]; g.add(mc); reg('macrophage',mc,INFO.macrophage); macs.push(mc); }
+    var clot=new THREE.Group(); clot.position.set(PX,-0.2,0); var clotMat=mat(DARK,{rough:0.85});
+    for(var cb=0;cb<9;cb++){ var cm=new THREE.Mesh(new THREE.SphereGeometry(0.55+(cb%3)*0.15,10,8), clotMat); var ca=cb*0.7; cm.position.set(Math.cos(ca)*0.7*(cb%3), -0.3+Math.sin(ca)*0.9, Math.sin(ca*1.3)*0.6); clot.add(cm); }
+    clot.visible=false; g.add(clot); reg('clot',clot,INFO.clot);
+
+    /* ---------- blood: red cells and lipoproteins ---------- */
+    var rbcGeo=new THREE.TorusGeometry(0.26,0.13,8,18), rbcMat=mat(RED,{rough:0.6}); var rbcs=[];
+    for(var r=0;r<14;r++){ var rc=new THREE.Mesh(rbcGeo,rbcMat); var s={x:-8+Math.random()*16, y:(Math.random()*2-1)*1.5, z:(Math.random()*2-1)*1.4, sp:0.8+Math.random()*0.4, rot:Math.random()*6}; rc.userData.s=s; rc.rotation.set(s.rot,s.rot*0.7,0); g.add(rc); reg('rbc',rc,INFO.rbc); rbcs.push(rc); }
+    var ldlCore=new THREE.SphereGeometry(0.3,14,12), hdlCore=new THREE.SphereGeometry(0.18,12,10), bandL=new THREE.TorusGeometry(0.3,0.05,6,20), bandH=new THREE.TorusGeometry(0.18,0.04,6,16);
+    var ldlMat=mat(AMBER,{rough:0.45}), hdlMat=mat(TEAL,{rough:0.45}), bandMatL=mat(PURPLE), bandMatH=mat(PURPLE);
+    function lipo(kind){
+      var grp=new THREE.Group(); grp.add(new THREE.Mesh(kind==='ldl'?ldlCore:hdlCore, kind==='ldl'?ldlMat:hdlMat));
+      var b=new THREE.Mesh(kind==='ldl'?bandL:bandH, kind==='ldl'?bandMatL:bandMatH); b.rotation.x=1.1; grp.add(b);
+      var cargo=new THREE.Mesh(dotGeo,dotMat); cargo.position.set(0,0.25,0); cargo.visible=false; grp.add(cargo);
+      grp.userData.s={kind:kind, x:0, y:0, z:0, sp:1, phase:'flow', t:0, tx:0, ty:0, tz:0, dot:null}; grp.userData.cargo=cargo;
+      g.add(grp); reg(kind, grp, INFO[kind]); return grp;
+    }
+    var ldls=[], hdls=[]; for(var li=0;li<14;li++) ldls.push(lipo('ldl')); for(var hi=0;hi<8;hi++) hdls.push(lipo('hdl'));
+    function respawn(p, anywhere){ var s=p.userData.s; s.x=anywhere?(-8+Math.random()*16):(-8.4-Math.random()*2); var a=Math.random()*Math.PI*2, rr=Math.random()*1.5; s.y=Math.sin(a)*rr; s.z=Math.cos(a)*rr*0.9; s.sp=0.8+Math.random()*0.4; s.phase='flow'; s.t=0; s.dot=null; p.userData.cargo.visible=false; }
+    ldls.forEach(function(p){ respawn(p,true); }); hdls.forEach(function(p){ respawn(p,true); });
+
+    /* ---------- cholesterol molecule, liver, receptors, gene ---------- */
+    var liver=new THREE.Group(); liver.position.set(6.6,-4.0,1.0);
+    var lobeA=ball(1,0x8A3A3A,20,{rough:0.7}); lobeA.scale.set(1.5,0.7,1.0); liver.add(lobeA); var lobeB=ball(1,0x9C4444,20,{rough:0.7}); lobeB.scale.set(0.9,0.55,0.8); lobeB.position.set(1.3,-0.05,0.2); liver.add(lobeB);
+    g.add(liver); reg('liver',liver,INFO.liver);
+    var receptors=new THREE.Group(); var recMat=mat(TEAL);
+    for(var ri=0;ri<5;ri++){ var post=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,0.5,8), recMat); post.position.set(-0.9+ri*0.45,0.85-Math.abs(ri-2)*0.08,0.1); receptors.add(post); var cup=new THREE.Mesh(new THREE.TorusGeometry(0.12,0.04,6,12), recMat); cup.rotation.x=Math.PI/2; cup.position.set(post.position.x,post.position.y+0.28,0.1); receptors.add(cup); }
+    liver.add(receptors); reg('receptor',receptors,INFO.receptor);
+    var gene=new THREE.Group(); gene.position.set(8.8,-2.4,2.0);
+    var gA=capsule(0.14,0.9,PURPLE); gA.rotation.z=0.5; gene.add(gA); var gB=capsule(0.14,0.9,PURPLE); gB.rotation.z=-0.5; gene.add(gB); var cen=ball(0.17,PINK,10); gene.add(cen);
+    g.add(gene); reg('gene',gene,INFO.gene);
+    var readout=new THREE.Mesh(new THREE.BoxGeometry(4.4,0.7,0.12), mat(0xFFFFFF,{opacity:0.35})); readout.position.set(2.6,4.1,0); g.add(readout); reg('readout',readout,INFO.readout);
+
+    /* ---------- labels ---------- */
+    var readoutLabel=K.label(readout,'LDL 6 · HDL 4 · flow 100%',0);
+    var plaqueLabel=K.label(plaque,'Plaque',-1.0);
+    var anchorL=new THREE.Object3D(), anchorH=new THREE.Object3D(); g.add(anchorL,anchorH);
+    K.label(anchorL,'LDL · outbound',0.6); K.label(anchorH,'HDL · return',0.5); K.label(chol,'Cholesterol · one molecule',0.9);
+    var liverLabel=K.label(liver,'Liver · LDL receptors',1.6); K.label(gene,'LDLR gene · click to toggle FH',0.9); K.label(clot,'Clot · heart attack',1.4);
+    K.label(macs[0],'Foam cells',0.6); var wallAnchor=new THREE.Object3D(); wallAnchor.position.set(-6.4,3.4,0); g.add(wallAnchor); K.label(wallAnchor,'Artery wall · 3 layers',0);
+
+    /* ---------- state ---------- */
+    function setScen(name){ self._scen=name; var S=SCEN[name];
+      ldls.forEach(function(p,i){ p.visible=i<S.ldl; if(!p.visible){ respawn(p,true); } }); hdls.forEach(function(p,i){ p.visible=i<S.hdl; if(!p.visible){ respawn(p,true); } });
+      recMat.color.setHex(name==='fh'?0x8A82A0:TEAL); setText(liverLabel, name==='fh'?'Liver · LDL receptors faulty (FH)':'Liver · LDL receptors');
+      if(scenSel.value!==name) scenSel.value=name;
+    }
+    function setPlaque(p){ self._p=Math.max(0,Math.min(1,p)); var want=Math.round(self._p*N_DOTS); dots.forEach(function(dm,i){ dm.visible=i<want; }); }
+    function setRupture(r){ self._rupt=r; }
+    function act(name){
+      if(name==='baseline'){ setScen('baseline'); setPlaque(0.05); setRupture(0); }
+      else if(name==='deposit'){ setScen('baseline'); setPlaque(0.15); setRupture(0); var n=0; ldls.forEach(function(p){ if(p.visible && n<2 && p.userData.s.phase==='flow'){ p.userData.s.x=PX-2.2-n*0.6; p.userData.s.y=-0.6; p.userData.s.z=0.3; startDive(p); n++; } }); }
+      else if(name==='inflame'){ setScen('baseline'); setPlaque(0.3); setRupture(0); }
+      else if(name==='growth'){ setScen('baseline'); setPlaque(0.6); setRupture(0); }
+      else if(name==='narrow'){ setScen('baseline'); setPlaque(0.85); setRupture(0); }
+      else if(name==='rupture'){ setScen('baseline'); setPlaque(1); setRupture(1); }
+      else if(name==='satfat'){ setScen('satfat'); setPlaque(0.3); setRupture(0); }
+      else if(name==='fiber'){ setScen('fiber'); setPlaque(0.6); setRupture(0); }
+      else if(name==='fh'){ setScen('fh'); setPlaque(0.3); setRupture(0); }
+    }
+    function startDive(p){ var s=p.userData.s; s.phase='dive'; s.t=0; s.tx=PX+(Math.random()*2-1)*0.8; s.ty=-2.2+0.1; s.tz=(Math.random()*2-1)*0.6; }
+    var scenSel=document.getElementById('arteryScen');
+    if(!scenSel){
+      scenSel=document.createElement('select'); scenSel.id='arteryScen';
+      scenSel.style.cssText='font:inherit;font-size:12.5px;font-weight:600;padding:7px 11px;border-radius:7px;border:1px solid var(--track);background:rgba(255,255,255,.75);color:var(--page-mute);cursor:pointer';
+      [['baseline','Scenario: baseline'],['satfat','Scenario: high saturated fat'],['fiber','Scenario: fiber + exercise'],['fh','Scenario: FH gene, clean diet']].forEach(function(o){ var op=document.createElement('option'); op.value=o[0]; op.textContent=o[1]; scenSel.appendChild(op); });
+      document.getElementById('bar').insertBefore(scenSel, document.getElementById('lvl'));
+    }
+    scenSel.setAttribute('data-model-ui','artery'); scenSel.onchange=function(){ setScen(scenSel.value); };
+    var resetBtn=K.button('arteryReset','btn ghost','Reset artery'); resetBtn.onclick=function(){ setPlaque(0.05); setRupture(0); crack.visible=false; };
+    act('baseline');
+
+    self._parts={plaque:plaque, cap:cap, crack:crack, dots:dots, macs:macs, clot:clot, rbcs:rbcs, ldls:ldls, hdls:hdls, liver:liver, gene:gene, chol:chol, anchorL:anchorL, anchorH:anchorH,
+      readoutLabel:readoutLabel, plaqueLabel:plaqueLabel, setText:setText, setScen:setScen, setPlaque:setPlaque, respawn:respawn, startDive:startDive, SCEN:SCEN, PX:PX, N_DOTS:N_DOTS, tmp:new THREE.Vector3(),
+      toggleFH:function(){ setScen(self._scen==='fh'?'baseline':'fh'); }};
+  },
+  onPick:function(info){ var r=this._K.onPick(info); if(info && info.key==='gene' && !this._K.quiz) this._parts.toggleFH(); return r; },
+  onReset:function(){ this._K.onReset(); },
+
+  tick:function(t){
+    var self=this, P=self._parts; if(!P) return;
+    var f=self._K.tick(t), at=f.at, dt=(self._K.quiz?0:f.dt), S=P.SCEN[self._scen], p=self._p, PX=P.PX;
+    var L=2.2+1.2*p, H=0.15+1.6*p, W=1.3+0.8*p;
+    var flow=Math.max(0,(1-0.55*p)*(1-self._rupt));
+    function ytop(x){ var q=(x-PX)/L; return -2.2+H*Math.sqrt(Math.max(0,1-q*q)); }
+
+    /* plaque geometry follows p; cap appears with growth; rupture grows the clot */
+    P.plaque.scale.set(L,H,W); P.cap.scale.set(L*1.04,H*1.04+0.04,W*1.04); P.cap.visible=p>0.35;
+    if(p>=1 && self._rupt<1) self._rupt=Math.min(1,self._rupt+dt*0.5);
+    var ru=self._rupt; P.clot.visible=ru>0.02; P.clot.scale.setScalar(Math.max(0.01,ru)); P.clot.position.y=-2.2+H+0.3; P.crack.visible=ru>0.02; P.crack.position.set(PX,-2.2+H,0);
+    P.cap.material.color.setHex(ru>0.02?0xB04060:0xE8A0B0);
+    P.dots.forEach(function(dm){ if(!dm.visible) return; var u=dm.userData.u; dm.position.set(PX+u[0]*L, -2.2+u[1]*H, u[2]*W); });
+    var nm=p>0.15?Math.min(4,Math.ceil(p*5)):0;
+    P.macs.forEach(function(mc,i){ mc.visible=i<nm; if(!mc.visible) return; var u=mc.userData.u; mc.position.set(PX+u[0]*L+Math.sin(at*0.7+i)*0.15, -2.2+u[1]*H, u[2]*W); mc.material.color.setHex(p>0.45?0xF2E6A0:0xEFE9F7); });
+
+    /* red cells ride the flow, deflected over the plaque */
+    P.rbcs.forEach(function(rc){ var s=rc.userData.s; s.x+=dt*2.4*flow*s.sp; if(s.x>8.6){ s.x=-8.6; s.y=(Math.random()*2-1)*1.5; s.z=(Math.random()*2-1)*1.4; }
+      var y=s.y; if(Math.abs(s.z)<W+0.3) y=Math.max(y, ytop(s.x)+0.35); rc.position.set(s.x, y, s.z); rc.rotation.x+=dt*flow*0.8; });
+
+    /* lipoproteins: flow, dive (LDL deposits), dock (HDL collects), carry to the liver */
+    var firstL=null, firstH=null;
+    function stepLipo(pt){
+      var s=pt.userData.s; if(!pt.visible) return;
+      if(s.phase==='flow'){
+        var was=s.x; s.x+=dt*2.2*flow*s.sp;
+        if(s.x>8.6) P.respawn(pt,false);
+        if(was<PX-1.8 && s.x>=PX-1.8 && flow>0.1){
+          if(s.kind==='ldl' && Math.random()<S.dive && self._rupt<0.02) P.startDive(pt);
+          else if(s.kind==='hdl' && Math.random()<S.dock && self._rupt<0.02){ var vis=P.dots.filter(function(d){ return d.visible; }); if(vis.length){ var dm=vis[Math.floor(Math.random()*vis.length)]; s.phase='dock'; s.t=0; s.dot=dm; } }
+        }
+        var y=s.y; if(Math.abs(s.z)<W+0.3) y=Math.max(y, ytop(s.x)+0.4); pt.position.set(s.x, y+Math.sin(at*2+s.x)*0.08, s.z);
+      } else if(s.phase==='dive'){
+        s.t+=dt; var u=Math.min(1,s.t/1.0); var e=u*u*(3-2*u); var ty=ytop(s.tx)+0.05;
+        pt.position.set(s.x+(s.tx-s.x)*e, s.y+(ty-s.y)*e, s.z+(s.tz-s.z)*e);
+        if(u>=1){ P.setPlaque(self._p+1/P.N_DOTS); self._flash=at; P.respawn(pt,false); }
+      } else if(s.phase==='dock'){
+        s.t+=dt; var u2=Math.min(1,s.t/0.9); var e2=u2*u2*(3-2*u2); var dp=s.dot.position;
+        pt.position.set(s.x+(dp.x-s.x)*e2, s.y+(dp.y+0.3-s.y)*e2, s.z+(dp.z-s.z)*e2);
+        if(u2>=1){ if(s.dot.visible){ P.setPlaque(self._p-1/P.N_DOTS); } pt.userData.cargo.visible=true; s.phase='liver'; s.t=0; s.x=pt.position.x; s.y=pt.position.y; s.z=pt.position.z; }
+      } else if(s.phase==='liver'){
+        s.t+=dt; var u3=Math.min(1,s.t/2.2); var lv=P.liver.position;
+        var mx=(s.x+lv.x)/2, my=Math.max(s.y,lv.y)+0.8;
+        var a=1-u3; pt.position.set(a*a*s.x+2*a*u3*mx+u3*u3*lv.x, a*a*s.y+2*a*u3*my+u3*u3*lv.y, a*a*s.z+2*a*u3*(s.z+1.5)+u3*u3*lv.z);
+        if(u3>=1) P.respawn(pt,false);
+      }
+      pt.rotation.y=at*1.2; pt.rotation.z=at*0.5;
+      if(s.kind==='ldl' && !firstL && s.phase==='flow') firstL=pt; if(s.kind==='hdl' && !firstH && s.phase==='flow') firstH=pt;
+    }
+    P.ldls.forEach(stepLipo); P.hdls.forEach(stepLipo);
+    if(firstL){ P.anchorL.visible=true; P.anchorL.position.copy(firstL.position); } else P.anchorL.visible=false;
+    if(firstH){ P.anchorH.visible=true; P.anchorH.position.copy(firstH.position); } else P.anchorH.visible=false;
+    var fl=Math.max(0,1-(at-self._flash)/0.6); if(self._K.glow.indexOf(P.plaque)<0){ P.plaque.material.emissive.setHex(0xFFF0A0); P.plaque.material.emissiveIntensity=fl*0.6; }
+    P.gene.rotation.y=at*0.6; P.chol.rotation.y=Math.sin(at*0.5)*0.4;
+    P.setText(P.readoutLabel, 'LDL '+S.ldl+' · HDL '+S.hdl+' · flow '+Math.round(flow*100)+'% · '+S.label);
+    P.setText(P.plaqueLabel, ru>0.02?'Plaque · ruptured':'Plaque · '+Math.round(p*100)+'% grown');
+  }
+});
+
 boot();
 </script>
 </body>
