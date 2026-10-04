@@ -2711,6 +2711,289 @@ MODELS.push({
   }
 });
 
+/* ============================================================
+   MODEL 8 — Plate to Land: Trophic Efficiency (Levels 26–27)
+   A three-tier energy pyramid (producers → primary → secondary
+   consumers) fed by the sun, with live energy packets and the ~90%
+   lost at each transfer rising away as heat. A plate on the right
+   can be served beans, chicken, beef or a mixed plate; the eater
+   moves to the trophic level the meal puts them on and a land grid
+   rebuilds to the crop area needed per 1,000 kcal delivered. A
+   Pasture toggle and a fine-print board carry the complications.
+   Built on teachKit (Tour, Quiz, Labels).
+   ============================================================ */
+MODELS.push({
+  id:'plate',
+  name:'8 · Plate to Land',
+  level:'Levels 26–27 · 3.1.9-12.H · 3.4.9-12.A',
+  hint:'Click a tier, an animal, a land grid or the sign · pick a meal to rebuild the land · Tour walks the arithmetic',
+  radius:17,
+  build:function(ctx){
+    var g=ctx.group, self=this;
+    var GREEN=0x7BC47F, AMBER=0xF0A73A, PINK=0xE0417B, PURPLE=0x6B4BA8, TEAL=0x2FB8A0, WHITE=0xF4F0E6, PAST=0xB8B4C8, SOIL=0x6B4F3A;
+    var MEALS={beans:{blocks:1, label:'bean bowl'}, chicken:{blocks:4, label:'chicken'}, beef:{blocks:10, label:'beef'}, mixed:{blocks:5, label:'mixed plate'}};
+    self._meal='beans'; self._graze=false; self._builtAt=0;
+
+    var INFO={
+      'sun':{tag:'Energy source', title:'The sun',
+        body:'The only energy input to the whole pyramid (deep-sea vents aside, where chemosynthesis stands in). Producers fix about 1% of the light that reaches them; everything above them only passes that energy along, keeping about a tenth at each step.'},
+      'producers':{tag:'Tier 1', title:'Producers · 10,000 kcal',
+        body:'Autotrophs — crops, grass, algae. They capture sunlight and store it as chemical energy: here, 10,000 kcal. Every calorie on every plate starts in this tier; nothing above it makes energy, it only loses most of it on the way up.'},
+      'primary':{tag:'Tier 2', title:'Primary consumers · 1,000 kcal',
+        body:'Herbivores — cattle, chickens, or you eating a bean bowl. Of the 10,000 kcal in the crops below, about 1,000 end up in this tier\'s bodies: roughly 10% survives each transfer. The rest powered the eater\'s own respiration, movement and warmth, or was never digested.'},
+      'secondary':{tag:'Tier 3', title:'Secondary consumers · 100 kcal',
+        body:'Eaters of the herbivores — you with a chicken or beef meal. About 100 kcal of the original 10,000 reach this tier. That 100× shrinkage is why there are far more plants than herbivores and far more herbivores than predators, and why food chains rarely run past four or five links.'},
+      'energy':{tag:'Energy in transit', title:'Energy packet',
+        body:'Chemical energy moving from eaten to eater — the direction every arrow in a food web points. Count the packets: ten leave the sun for the crops, one makes it up each tier, the rest peel off as heat.'},
+      'heat':{tag:'The missing 90%', title:'Heat loss',
+        body:'About 90% of the energy at each tier is spent powering the organism itself — respiration, moving, keeping warm — and leaves as heat that nothing can eat back. Energy flows one way through an ecosystem. It is nutrients that cycle.'},
+      'crop':{tag:'Producers', title:'Crops',
+        body:'10,000 kcal of stored sunlight. Fed to an animal they return about 1,000 kcal of meat; eaten directly, nearly all of it reaches you. Which route you take is the single biggest lever on how much land your food needs.'},
+      'cow':{tag:'Primary consumer', title:'Cow',
+        body:'A ruminant: microbes in its stomach ferment grass, which lets it live on land that cannot grow crops — and releases methane, a potent greenhouse gas. It converts feed to meat less efficiently than poultry, so beef sits at the costly end of the meat range.'},
+      'chicken':{tag:'Primary consumer', title:'Chicken',
+        body:'A primary consumer with a far better feed conversion ratio than cattle — fast growth, short lives, no ruminant fermentation. Still one trophic step above beans, so still a multiple of their land, water and feed per calorie.'},
+      'human':{tag:'The eater', title:'You',
+        body:'A secondary consumer when the plate is chicken or beef, a primary consumer when it is beans. An omnivore can choose its trophic level meal by meal, and each step down multiplies the number of people the same land can feed.'},
+      'decomposers':{tag:'Recyclers', title:'Decomposers',
+        body:'Fungi and bacteria that break down dead matter and waste from every tier, returning nitrogen, phosphorus and carbon to the soil for producers to use again. They recycle matter — never energy. What they release leaves as heat like everyone else\'s.'},
+      'nutrients':{tag:'Matter cycles', title:'Recycled nutrients',
+        body:'Minerals on their way back from decomposers into the producers\' roots. Unlike energy, matter goes round and round: the nitrogen in a steak was in grass, in soil, in a microbe, and will be again.'},
+      'plate':{tag:'1,000 kcal', title:'Your plate',
+        body:'A 1,000 kcal meal. The question is not how much is on it but how far it is from the sun: beans sit one step away, meat two. The land grid rebuilds for whatever is served.'},
+      'land':{tag:'Land per 1,000 kcal', title:'Crop land for this plate',
+        body:'Each block is 1,000 crop-kcal of farmland. Beans: 1 block. Chicken: about 4. Beef: 10 by the 10% rule alone — and more once feed conversion and years of upkeep are counted. Toggle Pasture to see which beef blocks were never farmland.'},
+      'landBeans':{tag:'Reference', title:'Bean bowl · 1 block',
+        body:'Eating producers directly, nearly every crop calorie reaches you. This is why shifting some calories down a trophic level frees land faster than any other change to a diet.'},
+      'landChicken':{tag:'Reference', title:'Chicken · ~4 blocks',
+        body:'One trophic step up, but poultry turns feed into meat efficiently, so the real multiple sits below the 10× the pure rule predicts. Farmed fish are similar; ruminants are not.'},
+      'landBeef':{tag:'Reference', title:'Beef · ~10 blocks',
+        body:'Ten blocks by the 10% rule, more in practice: a cow spends years maintaining itself before any of it is meat. The Pasture toggle shows the partial offset — some of this area could not grow crops anyway.'},
+      'pasture':{tag:'The complication', title:'Non-arable pasture',
+        body:'Grazing land too dry, steep or rocky for crops. Cattle turn its grass into food we can eat, so this block does not displace farmland the way a feed-grain block does. It still counts for water, methane and habitat — the fine print has the details.'},
+      'methane':{tag:'Hidden cost', title:'Methane',
+        body:'Released by the microbes fermenting grass in the cow\'s stomach. Per calorie delivered it is a large share of beef\'s greenhouse footprint — a cost the energy pyramid alone does not show.'},
+      'honesty':{tag:'Fine print', title:'What the 10% rule leaves out',
+        body:'Feed conversion differs by animal: poultry and farmed fish turn feed into meat far better than cattle. Much grazing happens on land that could not grow crops, so not every beef block displaces farmland. And wasted food wastes all the land, water and fertilizer behind it. None of this changes the direction of the answer — only its size.'}
+    };
+
+    var STOPS=[
+      {tag:'Overview', focus:null, r:17, keys:['producers','primary','secondary','plate'], act:'beans', title:'From sunlight to a plate',
+       body:'On the left an energy pyramid: producers at the base, the animals that eat them above, the animals that eat those on top. On the right a 1,000 kcal plate and the farmland it took to fill. Follow the energy up the tiers first, then change the meal.'},
+      {tag:'Source', focus:'sun', r:9, keys:['sun','crop'], act:'beans', title:'All of it starts as light',
+       body:'Producers capture sunlight and store it as chemical energy — 10,000 kcal in these crops. That is the whole energy budget; no tier above can add to it, each can only pass a fraction along. Every arrow in a food web points from eaten to eater, in the direction energy flows.'},
+      {tag:'Tier 1 → 2', focus:'producers', r:9, keys:['heat','producers'], act:'beans', title:'Ninety percent never makes it',
+       body:'Watch the packets leaving the producer tier: for every ten that arrive, nine drift off as heat. Growing, respiring, staying warm, and the parts nobody digests all cost energy that cannot be eaten back. About 10% reaches the next tier. Energy flows one way; only matter cycles.'},
+      {tag:'Tier 2', focus:'primary', r:8, keys:['primary','cow','chicken'], act:'beef', title:'1,000 kcal in the herbivores',
+       body:'Cattle and chickens eat the crops. Of 10,000 kcal of feed, about 1,000 end up as animal — and the same loss applies again when something eats them. The pyramid narrows because each tier has only a tenth of the one below to live on.'},
+      {tag:'Tier 3', focus:'secondary', r:7, keys:['secondary','human'], act:'beef', title:'100 kcal reach the top',
+       body:'Eat the animal and you are a secondary consumer: 10,000 → 1,000 → 100. One hundred times more crop energy had to be grown than you receive. That arithmetic, not the virtue of any food, is what sets the land demand of a meal.'},
+      {tag:'Bean bowl', focus:'land', r:9, keys:['land','landBeans','human'], act:'beans', title:'Eat the producers: one block',
+       body:'Serve beans and you step down a tier — you are the primary consumer now. One thousand kcal on the plate needs about one thousand crop-kcal grown: one block of land. Nearly all the energy the field captured arrives at your table.'},
+      {tag:'Chicken', focus:'land', r:9, keys:['land','landChicken','chicken'], act:'chicken', title:'One step up: about four blocks',
+       body:'Chicken puts a herbivore between the field and you. By the 10% rule that should cost ten blocks; poultry convert feed to meat so well that the real figure is nearer four. Still several times the land of the bean bowl — because of the extra trophic step, not the bird.'},
+      {tag:'Beef', focus:'land', r:9, keys:['land','landBeef','cow','methane'], act:'beef', title:'Beef: ten blocks and a gas',
+       body:'Beef is the 10% rule with nothing to soften it: ten blocks of crop land per plate, more once the years a cow spends maintaining itself are counted. And the microbes that let a cow live on grass also release methane, a greenhouse gas the pyramid never shows.'},
+      {tag:'Fine print', focus:'honesty', r:8, keys:['honesty','pasture'], act:'graze', title:'The honest complication',
+       body:'Some of those beef blocks have turned grey: pasture too dry or steep for crops. Cattle turn its grass into food, so those blocks displace no farmland. Feed conversion, pasture, water, fertilizer and methane all adjust the size of the answer — none reverses it.'},
+      {tag:'Decomposers', focus:'decomposers', r:8, keys:['decomposers','nutrients'], act:'beans', title:'Matter cycles; energy does not',
+       body:'Waste and dead matter from every tier go to fungi and bacteria, which return the nutrients to the soil for the crops to take up again. The brown packets go round and round. The energy they carried left as heat and never comes back — which is why the sun has to keep shining.'},
+      {tag:'Takeaway', focus:'plate', r:11, keys:['plate','land'], act:'mixed', title:'Trophic level drives land demand',
+       body:'A mixed plate lands in between: every calorie moved down a tier frees roughly ten crop-calories of land. Food waste wastes those inputs twice. The 10% rule is why the number of trophic steps between the sun and your plate matters more than what the food is called.'}
+    ];
+    STOPS.forEach(function(st){ st.enter=function(){ act(st.act); }; });
+    var QUIZ=[
+      {q:'Click the tier where energy first enters the food chain.', keys:['producers','crop'], enter:function(){ act('beans'); },
+       ok:'Producers — autotrophs storing sunlight as 10,000 kcal of chemical energy.', hint:'The wide green base of the pyramid.'},
+      {q:'10,000 kcal of crops are fed to cattle. Click the tier that ends up with about 1,000 kcal.', keys:['primary'], enter:function(){ act('beef'); },
+       ok:'Primary consumers: 10% of 10,000 is 1,000 kcal.', hint:'One step up from the producers.'},
+      {q:'Click the consumer that receives about 100 kcal of the original 10,000.', keys:['secondary','human'], enter:function(){ act('beef'); },
+       ok:'The secondary consumer: 10,000 → 1,000 → 100 kcal.', hint:'Two transfers up — the top of the pyramid.'},
+      {q:'Click where the missing 90% goes at each transfer.', keys:['heat'], enter:function(){ act('beans'); },
+       ok:'Heat — spent on respiration, movement and warmth, and gone for good.', hint:'The red packets drifting away from the tiers.'},
+      {q:'Click the organisms that recycle nutrients but cannot recycle energy.', keys:['decomposers','nutrients'], enter:function(){ act('beans'); },
+       ok:'Decomposers. Matter cycles; energy flows one way.', hint:'The mushrooms at the foot of the pyramid.'},
+      {q:'Click the energy source that the whole pyramid depends on.', keys:['sun'], enter:function(){ act('beans'); },
+       ok:'The sun. Producers fix its light; everything else lives on the leftovers.', hint:'Top left.'},
+      {q:'Click the land grid for the meal that needs the LEAST crop land per 1,000 kcal.', keys:['landBeans'], enter:function(){ act('beans'); },
+       ok:'Beans: one block. Eating producers directly keeps nearly every crop calorie.', hint:'The smallest of the three reference grids at the back.'},
+      {q:'Click the land grid for the meal that costs about ten times the land of a bean bowl.', keys:['landBeef'], enter:function(){ act('beef'); },
+       ok:'Beef: ten blocks by the 10% rule, more in practice.', hint:'The largest reference grid at the back.'},
+      {q:'Click the animal that converts feed to meat MOST efficiently.', keys:['chicken'], enter:function(){ act('mixed'); },
+       ok:'The chicken — poultry have a far better feed conversion ratio than ruminants.', hint:'The smaller animal on the second tier.'},
+      {q:'Click the animal whose digestion releases methane.', keys:['cow','methane'], enter:function(){ act('beef'); },
+       ok:'The cow: ruminant fermentation lets it eat grass and releases methane.', hint:'The animal with bubbles rising from it.'},
+      {q:'The plate is BEANS. Click the eater standing at the trophic level a bean bowl puts them on.', keys:['human'], enter:function(){ act('beans'); },
+       ok:'You, on the primary-consumer tier — one step from the sun.', hint:'The purple figure. Which tier is it standing on?'},
+      {q:'Click a block of land that could grow pasture but not crops.', keys:['pasture'], enter:function(){ act('graze'); },
+       ok:'Non-arable pasture — the honest offset to beef\'s land cost.', hint:'The grey blocks in the beef grid.'},
+      {q:'Click the sign that lists what the 10% rule leaves out.', keys:['honesty'], enter:function(){ act('beans'); },
+       ok:'The fine print: feed conversion, pasture, water, methane, waste.', hint:'The board on a post at the far right.'}
+    ];
+    var K=teachKit(self, {id:'plate', radius:17, group:g, labels:true, stops:STOPS, quiz:QUIZ, onTourEnd:function(){ act('beans'); }});
+    var reg=K.register;
+    function glowSafe(m, hex, inten){ if(K.glow.indexOf(m)>=0) return; m.material.emissive.setHex(hex); m.material.emissiveIntensity=inten; }
+
+    /* ---------- pyramid ---------- */
+    var PX=-4.0;
+    function tier(w,d,y,hex,op){ var m=new THREE.Mesh(new THREE.BoxGeometry(w,1.1,d), mat(hex,{opacity:op})); m.position.set(PX,y,0); g.add(m); return m; }
+    var t1=tier(6.6,4.6,0.55,GREEN,0.42), t2=tier(3.4,2.6,1.65,AMBER,0.5), t3=tier(1.6,1.3,2.75,PINK,0.55);
+    reg('producers',t1,INFO.producers); reg('primary',t2,INFO.primary); reg('secondary',t3,INFO.secondary);
+    var crops=new THREE.Group(); g.add(crops);
+    [[-6.6,1.2],[-6.0,-1.0],[-1.6,1.0],[-2.2,-1.2],[-6.9,0.1],[-1.3,-0.2]].forEach(function(p,i){
+      var c=new THREE.Mesh(new THREE.CylinderGeometry(0,0.28,0.7+(i%3)*0.15,8), mat(0x3F9F6B)); c.position.set(p[0],1.1+0.35+(i%3)*0.075,p[1]); crops.add(c);
+      var s=rod(0.03,0.35,0x3F9F6B); s.position.set(p[0],1.1+0.17,p[1]); crops.add(s); });
+    reg('crop',crops,INFO.crop);
+    var cow=new THREE.Group(); cow.position.set(-5.0,2.2,0.5);
+    var cbody=new THREE.Mesh(new THREE.BoxGeometry(1.0,0.5,0.46), mat(0xC9B8A8)); cbody.position.y=0.55; cow.add(cbody);
+    var chead=new THREE.Mesh(new THREE.BoxGeometry(0.34,0.3,0.3), mat(0xC9B8A8)); chead.position.set(0.62,0.7,0); cow.add(chead);
+    [[-0.35,0.17],[-0.35,-0.17],[0.35,0.17],[0.35,-0.17]].forEach(function(l){ var leg=rod(0.05,0.32,0x8A82A0); leg.position.set(l[0],0.16,l[1]); cow.add(leg); });
+    var spot=ball(0.14,0x3A3550,8); spot.scale.set(1,0.6,0.3); spot.position.set(-0.2,0.65,0.22); cow.add(spot);
+    g.add(cow); reg('cow',cow,INFO.cow);
+    var methane=new THREE.Group(); for(var mb=0;mb<3;mb++){ var bub=ball(0.1+mb*0.03,0xB8B4C8,8,{opacity:0.55}); bub.userData.ph=mb*0.9; methane.add(bub); }
+    methane.position.set(-4.3,2.9,0.5); g.add(methane); reg('methane',methane,INFO.methane);
+    var chicken=new THREE.Group(); chicken.position.set(-3.1,2.2,0.7);
+    var hbody=ball(0.25,0xFFFFFF,12); hbody.scale.set(1.2,0.9,1); hbody.position.y=0.3; chicken.add(hbody);
+    var hhead=ball(0.14,0xFFFFFF,10); hhead.position.set(0.25,0.58,0); chicken.add(hhead);
+    var beak=new THREE.Mesh(new THREE.CylinderGeometry(0,0.06,0.16,6), mat(AMBER)); beak.rotation.z=-Math.PI/2; beak.position.set(0.43,0.56,0); chicken.add(beak);
+    var comb=ball(0.05,PINK,6); comb.position.set(0.24,0.72,0); chicken.add(comb);
+    [[0.08],[-0.08]].forEach(function(l){ var leg=rod(0.025,0.14,AMBER); leg.position.set(0.05,0.07,l[0]); chicken.add(leg); });
+    g.add(chicken); reg('chicken',chicken,INFO.chicken);
+    var human=new THREE.Group();
+    var hb=capsule(0.18,0.5,PURPLE); hb.position.y=0.6; human.add(hb); var hh=ball(0.17,0xF2D2B8,12); hh.position.y=1.1; human.add(hh);
+    human.position.set(PX,3.3,0); g.add(human); reg('human',human,INFO.human);
+    var decomp=new THREE.Group(); decomp.position.set(-4.0,0,2.95);
+    var soil=new THREE.Mesh(new THREE.CylinderGeometry(1.0,1.0,0.1,20), mat(SOIL)); soil.position.y=0.05; decomp.add(soil);
+    [[-0.4,0.1,0.3],[0.3,-0.2,0.24],[0.1,0.45,0.18]].forEach(function(m){ var st=rod(0.07,m[2]*1.5,0xEFE9F7); st.position.set(m[0],0.1+m[2]*0.75,m[1]); decomp.add(st);
+      var cap=ball(m[2],0xB98BFF,10); cap.scale.set(1,0.5,1); cap.position.set(m[0],0.1+m[2]*1.5,m[1]); decomp.add(cap); });
+    g.add(decomp); reg('decomposers',decomp,INFO.decomposers);
+    var sun=ball(1.0,0xFFD866,28,{rough:0.9}); sun.material.emissive.setHex(0xFFB020); sun.material.emissiveIntensity=0.7; sun.position.set(-9.5,4.4,-3.0); g.add(sun); reg('sun',sun,INFO.sun);
+
+    /* ---------- plate, land grids, sign ---------- */
+    var plate=new THREE.Group(); plate.position.set(2.4,0.1,2.6);
+    var dish=new THREE.Mesh(new THREE.CylinderGeometry(1.1,1.0,0.08,28), mat(0xFFFFFF)); plate.add(dish);
+    var prim=new THREE.Mesh(new THREE.TorusGeometry(1.1,0.05,8,36), mat(0xD9D2E6)); prim.rotation.x=Math.PI/2; prim.position.y=0.04; plate.add(prim);
+    var foodBeans=new THREE.Group(); for(var fb=0;fb<8;fb++){ var bn=ball(0.12,0x9C6B3F,8); bn.scale.set(1.3,0.8,1); var fa=fb*0.8; bn.position.set(Math.cos(fa)*0.35*(fb%2?1:0.5),0.12,Math.sin(fa)*0.35*(fb%2?1:0.5)); foodBeans.add(bn); }
+    var foodChicken=capsule(0.22,0.5,AMBER); foodChicken.rotation.z=Math.PI/2; foodChicken.position.y=0.26;
+    var foodBeef=new THREE.Mesh(new THREE.BoxGeometry(0.7,0.24,0.5), mat(0xB0384F)); foodBeef.position.y=0.16;
+    plate.add(foodBeans,foodChicken,foodBeef); g.add(plate); reg('plate',plate,INFO.plate);
+    var blockGeo=new THREE.BoxGeometry(0.9,0.16,0.9);
+    var land=new THREE.Group(); land.position.set(6.0,0,1.4); g.add(land); var blocks=[];
+    for(var bi=0;bi<10;bi++){ var bk=new THREE.Mesh(blockGeo, mat(GREEN,{rough:0.8})); bk.position.set(((bi%5)-2)*1.0,0.08,(Math.floor(bi/5)-0.5)*1.0); bk.userData.i=bi; land.add(bk); blocks.push(bk); }
+    reg('land',land,INFO.land);
+    blocks.forEach(function(b){ reg('land', b, INFO.land); });
+    function setBlockKind(b, past){
+      var key=past?'pasture':'land', other=past?'land':'pasture';
+      b.userData.info=INFO[key]; INFO[key].key=key;
+      var lo=K.reg[other]||[], li=lo.indexOf(b); if(li>=0) lo.splice(li,1);
+      (K.reg[key]=K.reg[key]||[]); if(K.reg[key].indexOf(b)<0) K.reg[key].push(b);
+      b.material.color.setHex(past?PAST:GREEN);
+    }
+    var refs={};
+    [['landBeans',1,3.2],['landChicken',4,5.2],['landBeef',10,7.8]].forEach(function(r){
+      var grp=new THREE.Group(); grp.position.set(r[2],0,-3.4); grp.scale.setScalar(0.42);
+      for(var i=0;i<r[1];i++){ var b=new THREE.Mesh(blockGeo, mat(GREEN,{rough:0.8})); b.position.set(((i%5)-2)*1.0,0.08,(Math.floor(i/5)-0.5)*1.0); grp.add(b); }
+      g.add(grp); reg(r[0],grp,INFO[r[0]]); refs[r[0]]=grp; });
+    var sign=new THREE.Group(); sign.position.set(9.6,0,-1.8);
+    var post=rod(0.06,1.5,0x8A82A0); post.position.y=0.75; sign.add(post);
+    var cv=document.createElement('canvas'); cv.width=512; cv.height=288; var cx=cv.getContext('2d');
+    cx.fillStyle='#F4F0E6'; cx.fillRect(0,0,512,288); cx.fillStyle='#1C1530'; cx.font='700 40px "Segoe UI",system-ui,sans-serif'; cx.fillText('Fine print',36,70);
+    cx.font='500 30px "Segoe UI",system-ui,sans-serif'; ['Feed conversion varies','Pasture ≠ cropland','Water · fertilizer · methane','Waste wastes it all'].forEach(function(l,i){ cx.fillText(l,36,130+i*44); });
+    var boardTex=new THREE.CanvasTexture(cv); boardTex.minFilter=THREE.LinearFilter;
+    var board=new THREE.Mesh(new THREE.BoxGeometry(2.6,1.46,0.08), new THREE.MeshStandardMaterial({color:0xFFFFFF, map:boardTex, roughness:0.8}));
+    board.position.y=1.95; board.rotation.y=-0.5; sign.add(board); g.add(sign); reg('honesty',sign,INFO.honesty);
+
+    /* ---------- energy packets, heat, nutrients ---------- */
+    var FLOWS=[];
+    var pGeo=new THREE.SphereGeometry(0.14,10,8), pMat=mat(0xFFE66B); pMat.emissive.setHex(0xFFC800); pMat.emissiveIntensity=0.7;
+    var hGeo=new THREE.SphereGeometry(0.13,8,6), hMat=mat(0xF26A5B,{opacity:0.85}); hMat.emissive.setHex(0xE0417B); hMat.emissiveIntensity=0.35;
+    var nGeo=new THREE.SphereGeometry(0.1,8,6), nMat=mat(0x8A6A4A);
+    function flow(key, geo, m, pts, n, speed, active, wobble, scale){
+      var F={curve:new THREE.CatmullRomCurve3(pts.map(function(p){ return new THREE.Vector3(p[0],p[1],p[2]); })), n:n, speed:speed, active:active, vis:0, parts:[], wobble:wobble||0, scale:scale||1, fade:key==='heat'};
+      for(var i=0;i<n;i++){ var p=new THREE.Mesh(geo, m); p.visible=false; g.add(p); reg(key, p, INFO[key]); F.parts.push(p); }
+      FLOWS.push(F); return F;
+    }
+    var always=function(){ return true; }, meat=function(){ return self._meal!=='beans'; };
+    flow('energy',pGeo,pMat,[[-9.5,4.4,-3.0],[-8.4,3.0,-1.4],[-6.6,1.4,0.2]],10,0.16,always);
+    flow('heat',hGeo,hMat,[[-7.2,0.9,1.8],[-8.4,2.4,2.6],[-9.4,4.4,3.0]],9,0.14,always,0.25);
+    flow('energy',pGeo,pMat,[[-6.6,1.4,0.2],[-5.6,2.0,1.3],[-4.6,2.4,0.4]],1,0.16,always);
+    flow('heat',hGeo,hMat,[[-2.5,2.0,1.4],[-1.2,3.4,2.3],[-0.1,4.9,2.9]],1,0.14,always,0.25);
+    flow('energy',pGeo,pMat,[[-4.6,2.4,0.4],[-4.2,3.1,0.9],[-4.0,3.7,0.1]],1,0.16,meat,0,0.55);
+    flow('heat',hGeo,hMat,[[-3.3,3.3,0.7],[-2.5,4.6,1.5],[-1.9,5.8,2.0]],1,0.14,meat,0.25,0.55);
+    flow('nutrients',nGeo,nMat,[[-3.0,2.2,1.4],[-2.8,0.9,3.0],[-4.0,0.3,3.1],[-5.2,0.7,2.4],[-5.8,1.0,0.9]],5,0.08,always);
+
+    /* ---------- labels ---------- */
+    function anchor(x,y,z){ var a=new THREE.Object3D(); a.position.set(x,y,z); g.add(a); return a; }
+    K.label(anchor(0.4,0.55,0),'Producers · 10,000 kcal',0); K.label(anchor(0.1,1.65,0),'Primary consumers · 1,000 kcal',0); K.label(anchor(-0.2,2.75,0),'Secondary consumers · 100 kcal',0);
+    K.label(anchor(-8.6,2.6,2.6),'Heat · 90% lost',0); K.label(decomp,'Decomposers',0.9); K.label(sun,'Sun',-1.4);
+    var humanLabel=K.label(human,'You · primary consumer',1.6); var plateLabel=K.label(plate,'Plate · bean bowl',0.7);
+    var landLabel=K.label(land,'Crop land per 1,000 kcal · 1 block',1.0);
+    K.label(refs.landBeans,'Beans · 1',0.4); K.label(refs.landChicken,'Chicken · 4',0.5); K.label(refs.landBeef,'Beef · 10',0.6); K.label(board,'Fine print',1.0);
+    var pastureAnchor=new THREE.Object3D(); pastureAnchor.visible=false; land.add(pastureAnchor); K.label(pastureAnchor,'Pasture, not cropland',0.5);
+
+    /* ---------- state ---------- */
+    function setMeal(meal){
+      self._meal=meal; var M=MEALS[meal]; self._builtAt=performance.now()*0.001;
+      foodBeans.visible=(meal==='beans'||meal==='mixed'); foodChicken.visible=(meal==='chicken'||meal==='mixed'); foodBeef.visible=(meal==='beef'||meal==='mixed');
+      foodBeans.scale.setScalar(meal==='mixed'?0.6:1); foodChicken.scale.setScalar(meal==='mixed'?0.6:1); foodBeef.scale.setScalar(meal==='mixed'?0.6:1);
+      foodBeans.position.x=(meal==='mixed')?-0.45:0; foodChicken.position.x=(meal==='mixed')?0.35:0; foodBeef.position.z=(meal==='mixed')?0.45:0; foodBeef.position.x=(meal==='mixed')?0.2:0;
+      cow.visible=(meal==='beef'||meal==='mixed'); chicken.visible=(meal==='chicken'||meal==='mixed'); methane.visible=cow.visible;
+      var up=(meal!=='beans'); human.position.set(up?PX:PX+0.6, up?3.3:2.2, up?0:-0.5);
+      K.relabel(humanLabel, up?'You · secondary consumer':'You · primary consumer');
+      K.relabel(plateLabel, 'Plate · '+M.label+' · 1,000 kcal');
+      K.relabel(landLabel, 'Crop land per 1,000 kcal · '+M.blocks+(M.blocks===1?' block':' blocks'));
+      blocks.forEach(function(b,i){ b.visible=i<M.blocks; });
+      applyGraze(); if(mealSel.value!==meal) mealSel.value=meal;
+    }
+    function applyGraze(){
+      var M=MEALS[self._meal], grazeN=self._graze?(self._meal==='beef'?4:(self._meal==='mixed'?1:0)):0;
+      blocks.forEach(function(b,i){ setBlockKind(b, i>=M.blocks-grazeN && i<M.blocks); });
+      var first=null; blocks.forEach(function(b,i){ if(first===null && i>=M.blocks-grazeN && i<M.blocks) first=b; });
+      if(first){ pastureAnchor.position.copy(first.position); pastureAnchor.visible=true; } else pastureAnchor.visible=false;
+      grazeBtn.textContent=self._graze?'Pasture: on':'Pasture: off';
+    }
+    function act(name){
+      if(name==='graze'){ self._graze=true; setMeal('beef'); }
+      else { self._graze=false; setMeal(name); }
+    }
+    var mealSel=document.getElementById('plateMeal');
+    if(!mealSel){
+      mealSel=document.createElement('select'); mealSel.id='plateMeal';
+      mealSel.style.cssText='font:inherit;font-size:12.5px;font-weight:600;padding:7px 11px;border-radius:7px;border:1px solid var(--track);background:rgba(255,255,255,.75);color:var(--page-mute);cursor:pointer';
+      [['beans','Meal: bean bowl'],['chicken','Meal: chicken'],['beef','Meal: beef'],['mixed','Meal: mixed plate']].forEach(function(o){ var op=document.createElement('option'); op.value=o[0]; op.textContent=o[1]; mealSel.appendChild(op); });
+      document.getElementById('bar').insertBefore(mealSel, document.getElementById('lvl'));
+    }
+    mealSel.setAttribute('data-model-ui','plate'); mealSel.onchange=function(){ setMeal(mealSel.value); };
+    var grazeBtn=K.button('plateGraze','btn ghost','Pasture: off'); grazeBtn.onclick=function(){ self._graze=!self._graze; applyGraze(); };
+    act('beans');
+
+    self._parts={FLOWS:FLOWS, blocks:blocks, methane:methane, sun:sun, human:human, chicken:chicken, cow:cow, glowSafe:glowSafe};
+  },
+  onPick:function(info){ return this._K.onPick(info); },
+  onReset:function(){ this._K.onReset(); },
+
+  tick:function(t){
+    var self=this, P=self._parts; if(!P) return;
+    var f=self._K.tick(t), at=f.at, dt=f.dt, k=Math.min(1,dt*4);
+    for(var i=0;i<P.FLOWS.length;i++){
+      var F=P.FLOWS[i]; F.vis+=((F.active()?1:0)-F.vis)*k; var show=F.vis>0.03;
+      for(var j=0;j<F.n;j++){
+        var m=F.parts[j]; m.visible=show; if(!show) continue;
+        var u=(at*F.speed+j/F.n)%1; F.curve.getPointAt(u, m.position);
+        if(F.wobble){ m.position.x+=Math.sin(at*7+j*1.7)*F.wobble; m.position.z+=Math.cos(at*6+j*2.1)*F.wobble; }
+        var s=F.fade?(1-u*0.8):Math.min(1,u*8,(1-u)*8);
+        m.scale.setScalar(Math.max(0.01,F.vis*F.scale*(0.4+0.6*s)));
+      }
+    }
+    /* land blocks pop in on wall time (one-shot, so it survives the quiz freeze) */
+    var age=t-self._builtAt;
+    P.blocks.forEach(function(b,i){ if(!b.visible) return; var u=Math.min(1,Math.max(0,(age-i*0.08)*3)); var e=1-Math.pow(1-u,3); b.scale.set(e,e,e); b.position.y=0.08+(1-e)*1.2; });
+    P.methane.children.forEach(function(b){ var ph=(at*0.5+b.userData.ph)%1.6; b.position.set(Math.sin(ph*4)*0.12, ph*0.7, 0); b.material.opacity=0.55*(1-ph/1.6); });
+    P.sun.material.emissiveIntensity=0.6+0.15*Math.sin(at*2);
+    P.chicken.rotation.y=Math.sin(at*0.8)*0.3; P.cow.position.y=2.2+0.02*Math.sin(at*2);
+  }
+});
+
 boot();
 </script>
 </body>
