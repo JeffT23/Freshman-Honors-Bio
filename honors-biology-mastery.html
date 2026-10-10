@@ -399,8 +399,15 @@ function shuffle(a){
 }
 function lvl(n){ for(var i=0;i<LEVELS.length;i++) if(LEVELS[i].n===n) return LEVELS[i]; return null; }
 function cleared(s,a,b){ for(var i=a;i<=b;i++) if(!s.passed[i]) return false; return true; }
-function unlocked(n){ return n===1 || !!S.passed[n-1]; }
-function nextUp(){ for(var i=1;i<=40;i++){ if(unlocked(i) && !S.passed[i]) return i; } return null; }
+/* Every level is open: students may answer questions from any level in any order.
+   (The sequential gate used to be: n===1 || !!S.passed[n-1].) */
+function unlocked(n){ return true; }
+/* The next uncleared level, scanning forward from `after` (wrapping around) or from Level 1. */
+function nextUp(after){
+  var start=after?after+1:1;
+  for(var k=0;k<40;k++){ var i=((start-1+k)%40)+1; if(unlocked(i) && !S.passed[i]) return i; }
+  return null;
+}
 function esc(t){ return String(t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
 
 /* ============================ item drawing ======================== */
@@ -711,7 +718,7 @@ function results(right, pass, wrongIdx){
 
   if(pass){
     document.getElementById("cont").onclick=function(){
-      var nx=nextUp();
+      var nx=nextUp(Q.n);
       if(nx) intro(nx); else home();
     };
     document.getElementById("rev").onclick=function(){
